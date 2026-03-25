@@ -16,6 +16,23 @@ export type TelegramMessage = {
   from?: TelegramUser;
   chat: TelegramChat;
   text?: string;
+  entities?: TelegramMessageEntity[];
+  reply_to_message?: TelegramMessage;
+};
+
+export type TelegramMessageEntity = {
+  type:
+    | "mention"
+    | "text_mention"
+    | "bot_command"
+    | "bold"
+    | "italic"
+    | "code"
+    | "pre"
+    | "text_link";
+  offset: number;
+  length: number;
+  user?: TelegramUser;
 };
 
 export type TelegramCallbackQuery = {

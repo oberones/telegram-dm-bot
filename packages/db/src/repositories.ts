@@ -19,6 +19,7 @@ export type CharacterRecord = {
   class_key: string;
   level: number;
   status: "active" | "frozen" | "retired";
+  rules_version_id: string;
   wins: number;
   losses: number;
   matches_played: number;
@@ -26,6 +27,48 @@ export type CharacterRecord = {
   ability_scores: Record<string, unknown>;
   loadout: Record<string, unknown>;
   resource_state: Record<string, unknown>;
+};
+
+export type DisputeRecord = {
+  id: string;
+  challenger_user_id: string;
+  target_user_id: string;
+  challenger_character_id: string;
+  target_character_id: string;
+  reason: string;
+  status: "pending" | "accepted" | "declined" | "expired" | "cancelled" | "match_created";
+  created_at: Date;
+};
+
+export type MatchRecord = {
+  id: string;
+  dispute_id: string;
+  status: "queued" | "running" | "completed" | "cancelled" | "error" | "finalized_by_admin";
+  winner_character_id: string | null;
+  end_reason:
+    | "knockout"
+    | "round_limit_hp_pct"
+    | "round_limit_damage"
+    | "round_limit_hits"
+    | "sudden_death"
+    | "admin_finalized"
+    | "cancelled"
+    | "error"
+    | null;
+  rounds_completed?: number;
+  created_at?: Date;
+  completed_at?: Date | null;
+};
+
+export type MatchEventRecord = {
+  id: string;
+  match_id: string;
+  round_number: number;
+  sequence_number: number;
+  event_type: string;
+  public_text: string | null;
+  payload: Record<string, unknown>;
+  created_at: Date;
 };
 
 export type BotSessionRecord = {
@@ -64,6 +107,14 @@ type CharacterInput = {
   derivedStats: Record<string, unknown>;
   loadout: Record<string, unknown>;
   resourceState: Record<string, unknown>;
+};
+
+type CreateDisputeInput = {
+  challengerUserId: string;
+  targetUserId: string;
+  challengerCharacterId: string;
+  targetCharacterId: string;
+  reason: string;
 };
 
 function sessionExpiryDate() {
@@ -117,6 +168,7 @@ export async function getActiveCharacterByUserId(userId: string): Promise<Charac
           class_key,
           level,
           status,
+          rules_version_id,
           wins,
           losses,
           matches_played,
@@ -317,6 +369,7 @@ async function insertCharacter(
         class_key,
         level,
         status,
+        rules_version_id,
         wins,
         losses,
         matches_played,
@@ -339,4 +392,359 @@ async function insertCharacter(
   );
 
   return result.rows[0]!;
+}
+
+export async function getUserByUsername(username: string): Promise<UserRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserRecord>(
+      `
+        SELECT id, telegram_user_id, telegram_username, telegram_first_name, telegram_last_name, display_name, status
+        FROM users
+        WHERE lower(telegram_username) = lower($1)
+        LIMIT 1
+      `,
+      [username.replace(/^@/, "")],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function getUserById(userId: string): Promise<UserRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserRecord>(
+      `
+        SELECT id, telegram_user_id, telegram_username, telegram_first_name, telegram_last_name, display_name, status
+        FROM users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function getUserByTelegramUserId(telegramUserId: string): Promise<UserRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserRecord>(
+      `
+        SELECT id, telegram_user_id, telegram_username, telegram_first_name, telegram_last_name, display_name, status
+        FROM users
+        WHERE telegram_user_id = $1
+        LIMIT 1
+      `,
+      [telegramUserId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function createPendingDispute(input: CreateDisputeInput): Promise<DisputeRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<DisputeRecord>(
+      `
+        INSERT INTO disputes (
+          challenger_user_id,
+          target_user_id,
+          challenger_character_id,
+          target_character_id,
+          reason,
+          status,
+          expires_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 'pending', NOW() + interval '24 hours', NOW())
+        RETURNING id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+      `,
+      [
+        input.challengerUserId,
+        input.targetUserId,
+        input.challengerCharacterId,
+        input.targetCharacterId,
+        input.reason,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function getPendingIncomingDisputes(userId: string): Promise<DisputeRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<DisputeRecord>(
+      `
+        SELECT id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+        FROM disputes
+        WHERE target_user_id = $1
+          AND status = 'pending'
+        ORDER BY created_at ASC
+      `,
+      [userId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getPendingOutgoingDisputes(userId: string): Promise<DisputeRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<DisputeRecord>(
+      `
+        SELECT id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+        FROM disputes
+        WHERE challenger_user_id = $1
+          AND status = 'pending'
+        ORDER BY created_at ASC
+      `,
+      [userId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function declinePendingDispute(disputeId: string, targetUserId: string): Promise<boolean> {
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        UPDATE disputes
+        SET status = 'declined',
+            declined_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+          AND target_user_id = $2
+          AND status = 'pending'
+      `,
+      [disputeId, targetUserId],
+    );
+
+    return (result.rowCount ?? 0) > 0;
+  });
+}
+
+export async function resolvePendingDispute(params: {
+  disputeId: string;
+  targetUserId: string;
+  rulesVersionId: string;
+  rulesSnapshot: Record<string, unknown>;
+  challengerCharacter: CharacterRecord;
+  targetCharacter: CharacterRecord;
+  winnerCharacterId: string;
+  endReason: MatchRecord["end_reason"];
+  roundsCompleted: number;
+  events: Array<{
+    eventType: string;
+    roundNumber: number;
+    sequenceNumber: number;
+    publicText: string;
+    payload: Record<string, unknown>;
+    actorCharacterId?: string;
+    targetCharacterId?: string;
+  }>;
+}): Promise<{ dispute: DisputeRecord; match: MatchRecord }> {
+  return withTransaction(async (client) => {
+    const disputeResult = await client.query<DisputeRecord>(
+      `
+        UPDATE disputes
+        SET status = 'match_created',
+            accepted_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+          AND target_user_id = $2
+          AND status = 'pending'
+        RETURNING id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+      `,
+      [params.disputeId, params.targetUserId],
+    );
+
+    const dispute = disputeResult.rows[0];
+
+    if (!dispute) {
+      throw new Error("Pending dispute not found or already handled");
+    }
+
+    const matchResult = await client.query<MatchRecord>(
+      `
+        INSERT INTO matches (
+          dispute_id,
+          rules_version_id,
+          rules_snapshot,
+          status,
+          winner_character_id,
+          end_reason,
+          rounds_completed,
+          started_at,
+          completed_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3::jsonb, 'completed', $4, $5, $6, NOW(), NOW(), NOW())
+        RETURNING id, dispute_id, status, winner_character_id, end_reason
+      `,
+      [
+        dispute.id,
+        params.rulesVersionId,
+        JSON.stringify(params.rulesSnapshot),
+        params.winnerCharacterId,
+        params.endReason,
+        params.roundsCompleted,
+      ],
+    );
+
+    const match = matchResult.rows[0]!;
+
+    const participants = [
+      params.challengerCharacter,
+      params.targetCharacter,
+    ] as const;
+
+    const participantIdByCharacterId = new Map<string, string>();
+
+    for (const character of participants) {
+      const isWinner = character.id === params.winnerCharacterId;
+      const participantInsert = await client.query<{ id: string }>(
+        `
+          INSERT INTO match_participants (
+            match_id,
+            character_id,
+            user_id,
+            slot,
+            is_winner,
+            snapshot
+          )
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+          RETURNING id
+        `,
+        [
+          match.id,
+          character.id,
+          character.user_id,
+          character.id === params.challengerCharacter.id ? 1 : 2,
+          isWinner,
+          JSON.stringify(character),
+        ],
+      );
+
+      participantIdByCharacterId.set(character.id, participantInsert.rows[0]!.id);
+    }
+
+    for (const event of params.events) {
+      await client.query(
+        `
+          INSERT INTO match_events (
+            match_id,
+            round_number,
+            sequence_number,
+            event_type,
+            actor_participant_id,
+            target_participant_id,
+            public_text,
+            payload
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        `,
+        [
+          match.id,
+          event.roundNumber,
+          event.sequenceNumber,
+          event.eventType,
+          event.actorCharacterId ? participantIdByCharacterId.get(event.actorCharacterId) ?? null : null,
+          event.targetCharacterId ? participantIdByCharacterId.get(event.targetCharacterId) ?? null : null,
+          event.publicText,
+          JSON.stringify(event.payload),
+        ],
+      );
+    }
+
+    for (const character of participants) {
+      const isWinner = character.id === params.winnerCharacterId;
+      await client.query(
+        `
+          UPDATE characters
+          SET wins = wins + $2,
+              losses = losses + $3,
+              matches_played = matches_played + 1,
+              last_match_at = NOW(),
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [character.id, isWinner ? 1 : 0, isWinner ? 0 : 1],
+      );
+    }
+
+    return {
+      dispute,
+      match,
+    };
+  });
+}
+
+export async function listMatches(limit = 50): Promise<MatchRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchRecord>(
+      `
+        SELECT id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
+        FROM matches
+        ORDER BY created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getMatchById(matchId: string): Promise<MatchRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchRecord>(
+      `
+        SELECT id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
+        FROM matches
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [matchId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function listMatchEvents(matchId: string): Promise<MatchEventRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchEventRecord>(
+      `
+        SELECT id, match_id, round_number, sequence_number, event_type, public_text, payload, created_at
+        FROM match_events
+        WHERE match_id = $1
+        ORDER BY sequence_number ASC
+      `,
+      [matchId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getDashboardCounts(): Promise<{
+  pendingDisputes: number;
+  runningMatches: number;
+  failedMatches: number;
+}> {
+  return withTransaction(async (client) => {
+    const [pendingDisputes, runningMatches, failedMatches] = await Promise.all([
+      client.query<{ count: string }>("SELECT count(*)::text AS count FROM disputes WHERE status = 'pending'"),
+      client.query<{ count: string }>("SELECT count(*)::text AS count FROM matches WHERE status = 'running'"),
+      client.query<{ count: string }>("SELECT count(*)::text AS count FROM matches WHERE status = 'error'"),
+    ]);
+
+    return {
+      pendingDisputes: Number(pendingDisputes.rows[0]?.count ?? 0),
+      runningMatches: Number(runningMatches.rows[0]?.count ?? 0),
+      failedMatches: Number(failedMatches.rows[0]?.count ?? 0),
+    };
+  });
 }

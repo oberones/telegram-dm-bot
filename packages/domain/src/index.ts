@@ -1,13 +1,28 @@
 import {
   cancelActiveSession,
   createCharacterAndCompleteSession,
+  createPendingDispute,
+  declinePendingDispute,
   ensureRulesVersion,
   getActiveCharacterByUserId,
   getActiveSessionByUserId,
+  getPendingIncomingDisputes,
+  getPendingOutgoingDisputes,
+  getUserById,
+  getUserByTelegramUserId,
+  getUserByUsername,
+  resolvePendingDispute,
   upsertActiveSession,
   upsertTelegramUser,
   type CharacterRecord,
+  type DisputeRecord,
 } from "@dm-bot/db";
+import {
+  resolveMatch,
+  type CombatEvent,
+  type CombatParticipant,
+  type MatchResolutionResult,
+} from "@dm-bot/engine";
 
 export type OutboundMessage = {
   text: string;
@@ -15,6 +30,26 @@ export type OutboundMessage = {
     inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
   };
 };
+
+export type NotificationMessage = {
+  telegramUserId: string;
+  message: OutboundMessage;
+};
+
+export type CommandResult = {
+  message: OutboundMessage;
+  notifications?: NotificationMessage[];
+};
+
+export type DisputeTarget =
+  | {
+      type: "username";
+      username: string;
+    }
+  | {
+      type: "telegram_user_id";
+      telegramUserId: string;
+    };
 
 export type TelegramActor = {
   telegramUserId: string;
@@ -166,10 +201,14 @@ function startButtons(hasCharacter: boolean) {
     return [
       [{ text: "View Character", callback_data: "nav:character" }],
       [{ text: "Create Character", callback_data: "nav:create_character" }],
+      [{ text: "Help", callback_data: "nav:help" }],
     ];
   }
 
-  return [[{ text: "Create Character", callback_data: "nav:create_character" }]];
+  return [
+    [{ text: "Create Character", callback_data: "nav:create_character" }],
+    [{ text: "Help", callback_data: "nav:help" }],
+  ];
 }
 
 function rulesConfigSnapshot() {
@@ -214,6 +253,114 @@ async function ensureUser(actor: TelegramActor) {
     telegramLastName: actor.telegramLastName,
     displayName: displayName(actor),
   });
+}
+
+function helpText() {
+  return [
+    "This bot resolves disputes through automated 1v1 fantasy combat using a simplified 5e-style ruleset.",
+    "",
+    "Commands:",
+    "/start",
+    "/help",
+    "/create_character",
+    "/character",
+    "/dispute @username reason",
+    "/accept",
+    "/decline",
+    "/cancel",
+    "",
+    "Group chats:",
+    "- /start, /help, and /dispute work in groups",
+    "- character creation and sheet management should be done in DM",
+  ].join("\n");
+}
+
+function parseDisputeCommand(text: string) {
+  const match = text.match(/^\/dispute(?:@[A-Za-z0-9_]+)?\s+(@[A-Za-z0-9_]{3,})\s+([\s\S]+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    username: match[1]!,
+    reason: match[2]!.trim(),
+  };
+}
+
+function parseReplyDisputeCommand(text: string) {
+  const match = text.match(/^\/dispute(?:@[A-Za-z0-9_]+)?\s+([\s\S]+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const reason = match[1]!.trim();
+
+  if (!reason) {
+    return null;
+  }
+
+  return { reason };
+}
+
+function toCombatParticipant(character: CharacterRecord, slot: 1 | 2): CombatParticipant {
+  return {
+    slot,
+    name: character.name,
+    classKey: character.class_key as CombatParticipant["classKey"],
+    level: character.level,
+    abilityScores: character.ability_scores as CombatParticipant["abilityScores"],
+    derivedStats: character.derived_stats as CombatParticipant["derivedStats"],
+    loadout: character.loadout as CombatParticipant["loadout"],
+    resourceState: character.resource_state as CombatParticipant["resourceState"],
+  };
+}
+
+function buildMatchSummary(
+  challengerCharacter: CharacterRecord,
+  targetCharacter: CharacterRecord,
+  result: MatchResolutionResult,
+  reason: string,
+) {
+  const eventLines = result.events.map((event) => event.summary);
+
+  return [
+    `${challengerCharacter.name} vs ${targetCharacter.name}`,
+    `Reason: ${reason}`,
+    "",
+    ...eventLines,
+  ].join("\n");
+}
+
+function toPersistedEvent(
+  event: CombatEvent,
+  challengerCharacterId: string,
+  targetCharacterId: string,
+  sequenceNumber: number,
+) {
+  const actorCharacterId =
+    "participantSlot" in event
+      ? event.participantSlot === 1
+        ? challengerCharacterId
+        : targetCharacterId
+      : undefined;
+  const targetCharacterIdValue =
+    "targetSlot" in event
+      ? event.targetSlot === 1
+        ? challengerCharacterId
+        : targetCharacterId
+      : undefined;
+
+  return {
+    eventType: event.type,
+    roundNumber: "round" in event ? event.round : 0,
+    sequenceNumber,
+    publicText: event.summary,
+    payload: event as unknown as Record<string, unknown>,
+    ...(actorCharacterId ? { actorCharacterId } : {}),
+    ...(targetCharacterIdValue ? { targetCharacterId: targetCharacterIdValue } : {}),
+  };
 }
 
 export function buildReadinessSnapshot() {
@@ -263,6 +410,12 @@ export async function handleStart(actor: TelegramActor): Promise<OutboundMessage
     replyMarkup: {
       inline_keyboard: startButtons(false),
     },
+  };
+}
+
+export async function handleHelp(): Promise<OutboundMessage> {
+  return {
+    text: helpText(),
   };
 }
 
@@ -333,6 +486,7 @@ export async function handleCreateCharacter(actor: TelegramActor): Promise<Outbo
 export async function handleCallback(actor: TelegramActor, callbackData: string): Promise<{
   alertText?: string;
   message?: OutboundMessage;
+  notifications?: NotificationMessage[];
 }> {
   if (callbackData === "nav:create_character") {
     return {
@@ -343,6 +497,32 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
   if (callbackData === "nav:character") {
     return {
       message: await handleCharacter(actor),
+    };
+  }
+
+  if (callbackData === "nav:help") {
+    return {
+      message: await handleHelp(),
+    };
+  }
+
+  if (callbackData.startsWith("dispute:accept:")) {
+    const disputeId = callbackData.slice("dispute:accept:".length);
+    const result = await handleAccept(actor, disputeId);
+    return {
+      alertText: "Dispute accepted",
+      message: result.message,
+      ...(result.notifications ? { notifications: result.notifications } : {}),
+    };
+  }
+
+  if (callbackData.startsWith("dispute:decline:")) {
+    const disputeId = callbackData.slice("dispute:decline:".length);
+    const result = await handleDecline(actor, disputeId);
+    return {
+      alertText: "Dispute declined",
+      message: result.message,
+      ...(result.notifications ? { notifications: result.notifications } : {}),
     };
   }
 
@@ -456,5 +636,320 @@ export async function handleTextMessage(
     replyMarkup: {
       inline_keyboard: [[{ text: "View Character", callback_data: "nav:character" }]],
     },
+  };
+}
+
+export async function handleDisputeCommand(params: {
+  actor: TelegramActor;
+  reason: string;
+  target: DisputeTarget;
+}): Promise<CommandResult> {
+  const { actor, reason, target } = params;
+  const normalizedReason = reason.trim();
+
+  if (!normalizedReason) {
+    return {
+      message: {
+        text: "Please include a short reason for the dispute.",
+      },
+    };
+  }
+
+  const challenger = await ensureUser(actor);
+
+  if (challenger.status !== "active") {
+    return {
+      message: {
+        text: "Your access to arena actions is currently restricted.",
+      },
+    };
+  }
+
+  const challengerCharacter = await getActiveCharacterByUserId(challenger.id);
+
+  if (!challengerCharacter) {
+    return {
+      message: {
+        text: "You need a character before you can start a dispute.",
+      },
+    };
+  }
+
+  const targetUser =
+    target.type === "username"
+      ? await getUserByUsername(target.username)
+      : await getUserByTelegramUserId(target.telegramUserId);
+
+  if (!targetUser) {
+    return {
+      message: {
+        text: "I couldn't identify that target yet. They need to have started the bot first and created a character.",
+      },
+    };
+  }
+
+  if (targetUser.id === challenger.id) {
+    return {
+      message: {
+        text: "You cannot challenge yourself in v1.",
+      },
+    };
+  }
+
+  const targetCharacter = await getActiveCharacterByUserId(targetUser.id);
+
+  if (!targetCharacter) {
+    return {
+      message: {
+        text: `${targetUser.display_name} does not have an active character yet.`,
+      },
+    };
+  }
+
+  const existingOutgoing = await getPendingOutgoingDisputes(challenger.id);
+
+  if (existingOutgoing.some((dispute) => dispute.target_user_id === targetUser.id)) {
+    return {
+      message: {
+        text: `You already have a pending dispute with ${targetUser.display_name}.`,
+      },
+    };
+  }
+
+  const dispute = await createPendingDispute({
+    challengerUserId: challenger.id,
+    targetUserId: targetUser.id,
+    challengerCharacterId: challengerCharacter.id,
+    targetCharacterId: targetCharacter.id,
+    reason: normalizedReason,
+  });
+
+  return {
+    message: {
+      text: `Challenge sent to ${targetUser.display_name}.\nReason: ${dispute.reason}`,
+    },
+    notifications: [
+      {
+        telegramUserId: targetUser.telegram_user_id,
+        message: {
+          text: [
+            `${challenger.display_name} has challenged you to arbitration.`,
+            `Their character: ${challengerCharacter.name}`,
+            `Your character: ${targetCharacter.name}`,
+            `Reason: ${dispute.reason}`,
+          ].join("\n"),
+          replyMarkup: {
+            inline_keyboard: [
+              [{ text: "Accept", callback_data: `dispute:accept:${dispute.id}` }],
+              [{ text: "Decline", callback_data: `dispute:decline:${dispute.id}` }],
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+export async function handleParsedDisputeCommand(
+  actor: TelegramActor,
+  text: string,
+): Promise<CommandResult> {
+  const parsed = parseDisputeCommand(text);
+
+  if (!parsed) {
+    return {
+      message: {
+        text: "Use /dispute @username reason, or reply to someone's message with /dispute reason",
+      },
+    };
+  }
+
+  return handleDisputeCommand({
+    actor,
+    reason: parsed.reason,
+    target: {
+      type: "username",
+      username: parsed.username,
+    },
+  });
+}
+
+export async function handleReplyDisputeCommand(params: {
+  actor: TelegramActor;
+  text: string;
+  repliedUserTelegramId: string;
+}): Promise<CommandResult> {
+  const parsed = parseReplyDisputeCommand(params.text);
+
+  if (!parsed) {
+    return {
+      message: {
+        text: "Reply to someone's message with /dispute reason",
+      },
+    };
+  }
+
+  return handleDisputeCommand({
+    actor: params.actor,
+    reason: parsed.reason,
+    target: {
+      type: "telegram_user_id",
+      telegramUserId: params.repliedUserTelegramId,
+    },
+  });
+}
+
+async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeRecord): Promise<CommandResult> {
+  const targetUser = await ensureUser(actor);
+  const challengerUser = await getUserById(dispute.challenger_user_id);
+
+  if (!challengerUser) {
+    return {
+      message: {
+        text: "The challenger could not be found anymore.",
+      },
+    };
+  }
+
+  const challengerCharacter = await getActiveCharacterByUserId(dispute.challenger_user_id);
+  const targetCharacter = await getActiveCharacterByUserId(targetUser.id);
+
+  if (!challengerCharacter || !targetCharacter) {
+    return {
+      message: {
+        text: "One of the characters is no longer eligible for this dispute.",
+      },
+    };
+  }
+
+  const result = resolveMatch({
+    participants: [
+      toCombatParticipant(challengerCharacter, 1),
+      toCombatParticipant(targetCharacter, 2),
+    ],
+  });
+
+  const rulesVersion = await ensureRulesVersion({
+    versionKey: "arena-v1-alpha",
+    summary: "Initial starter rules for automated 1v1 arbitration combat.",
+    config: rulesConfigSnapshot(),
+  });
+
+  await resolvePendingDispute({
+    disputeId: dispute.id,
+    targetUserId: targetUser.id,
+    rulesVersionId: rulesVersion.id,
+    rulesSnapshot: rulesConfigSnapshot(),
+    challengerCharacter,
+    targetCharacter,
+    winnerCharacterId:
+      result.winnerParticipantSlot === 1 ? challengerCharacter.id : targetCharacter.id,
+    endReason: result.endReason,
+    roundsCompleted: result.roundsCompleted,
+    events: result.events.map((event, index) =>
+      toPersistedEvent(event, challengerCharacter.id, targetCharacter.id, index + 1),
+    ),
+  });
+
+  const summary = buildMatchSummary(
+    challengerCharacter,
+    targetCharacter,
+    result,
+    dispute.reason,
+  );
+
+  return {
+    message: {
+      text: summary,
+    },
+    notifications: [
+      {
+        telegramUserId: challengerUser.telegram_user_id,
+        message: {
+          text: summary,
+        },
+      },
+    ],
+  };
+}
+
+export async function handleAccept(
+  actor: TelegramActor,
+  explicitDisputeId?: string,
+): Promise<CommandResult> {
+  const user = await ensureUser(actor);
+  const disputes = await getPendingIncomingDisputes(user.id);
+
+  if (disputes.length === 0) {
+    return {
+      message: {
+        text: "You have no pending disputes to accept.",
+      },
+    };
+  }
+
+  const dispute = explicitDisputeId
+    ? disputes.find((candidate) => candidate.id === explicitDisputeId)
+    : disputes.length === 1
+      ? disputes[0]
+      : undefined;
+
+  if (!dispute) {
+    return {
+      message: {
+        text: "You have multiple pending disputes. Use the inline buttons to choose one.",
+      },
+    };
+  }
+
+  return resolveAcceptedDispute(actor, dispute);
+}
+
+export async function handleDecline(
+  actor: TelegramActor,
+  explicitDisputeId?: string,
+): Promise<CommandResult> {
+  const user = await ensureUser(actor);
+  const disputes = await getPendingIncomingDisputes(user.id);
+
+  if (disputes.length === 0) {
+    return {
+      message: {
+        text: "You have no pending disputes to decline.",
+      },
+    };
+  }
+
+  const dispute = explicitDisputeId
+    ? disputes.find((candidate) => candidate.id === explicitDisputeId)
+    : disputes.length === 1
+      ? disputes[0]
+      : undefined;
+
+  if (!dispute) {
+    return {
+      message: {
+        text: "You have multiple pending disputes. Use the inline buttons to choose one.",
+      },
+    };
+  }
+
+  const declined = await declinePendingDispute(dispute.id, user.id);
+  const challenger = await getUserById(dispute.challenger_user_id);
+
+  return {
+    message: {
+      text: declined ? "You declined the dispute." : "That dispute is no longer pending.",
+    },
+    notifications: challenger && declined
+      ? [
+          {
+            telegramUserId: challenger.telegram_user_id,
+            message: {
+              text: `${user.display_name} declined your dispute: ${dispute.reason}`,
+            },
+          },
+        ]
+      : [],
   };
 }

@@ -8,11 +8,19 @@ export class TelegramClient {
   constructor(private readonly config: AppConfig) {}
 
   async sendMessage(chatId: string | number, message: OutboundMessage) {
-    return this.call("sendMessage", {
-      chat_id: chatId,
-      text: message.text,
-      reply_markup: message.replyMarkup,
-    });
+    const chunks = splitTelegramMessage(message.text);
+
+    let lastResponse: unknown;
+
+    for (const [index, chunk] of chunks.entries()) {
+      lastResponse = await this.call("sendMessage", {
+        chat_id: chatId,
+        text: chunk,
+        reply_markup: index === 0 ? message.replyMarkup : undefined,
+      });
+    }
+
+    return lastResponse;
   }
 
   async answerCallbackQuery(callbackQueryId: string, text?: string) {
@@ -55,4 +63,32 @@ export class TelegramClient {
 
     return response.json();
   }
+}
+
+function splitTelegramMessage(text: string, maxChars = 3500) {
+  if (text.length <= maxChars) {
+    return [text];
+  }
+
+  const lines = text.split("\n");
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+
+    if (candidate.length > maxChars && current) {
+      chunks.push(current);
+      current = line;
+      continue;
+    }
+
+    current = candidate;
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
