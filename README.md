@@ -4,7 +4,7 @@ Dungeon Master Bot is a Telegram-first dispute arbitration system where users se
 
 Normal users interact through Telegram. Operators and moderators use a browser-based admin panel. The project is designed to run through Docker both locally and in production so workstation and server workflows stay aligned.
 
-Current repo version: `0.11.0`
+Current repo version: `0.11.1`
 
 ## Current Status
 
@@ -185,7 +185,11 @@ make typecheck
 make build
 make test
 make test-engine
+make test-db
+make test-shared
 make test-server
+make release-version
+make release-check
 make migrate
 make docker-local-build
 make docker-local-up
@@ -312,6 +316,7 @@ Useful operational references:
 
 - [ALPHA_RELEASE_CHECKLIST.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_RELEASE_CHECKLIST.md)
 - [BETA_RELEASE_CHECKLIST.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BETA_RELEASE_CHECKLIST.md)
+- [RELEASE_PROCESS.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/RELEASE_PROCESS.md)
 - [OPERATOR_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/OPERATOR_RUNBOOK.md)
 - [BACKUP_RESTORE_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BACKUP_RESTORE_RUNBOOK.md)
 - [ALPHA_BUG_BACKLOG.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_BUG_BACKLOG.md)
