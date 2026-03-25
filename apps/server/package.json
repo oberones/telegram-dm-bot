@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@dm-bot/db": "0.1.0",
     "@dm-bot/domain": "0.1.0",
     "@dm-bot/shared": "0.1.0",
     "fastify": "^5.2.1"

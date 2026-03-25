@@ -1,4 +1,5 @@
 export type AppEnv = "local" | "staging" | "production";
+export type TelegramDeliveryMode = "webhook" | "polling";
 
 export type AppConfig = {
   nodeEnv: string;
@@ -15,6 +16,8 @@ export type AppConfig = {
   logLevel: string;
   defaultRulesVersion: string;
   disableNewDisputes: boolean;
+  telegramDeliveryMode: TelegramDeliveryMode;
+  telegramPollingTimeoutSeconds: number;
 };
 
 function readString(name: string, fallback?: string): string {
@@ -75,5 +78,7 @@ export function loadConfig(): AppConfig {
     logLevel: readString("LOG_LEVEL", "info"),
     defaultRulesVersion: readString("DEFAULT_RULES_VERSION", "arena-v1-alpha"),
     disableNewDisputes: readBoolean("DISABLE_NEW_DISPUTES", false),
+    telegramDeliveryMode: readString("TELEGRAM_DELIVERY_MODE", "webhook") as TelegramDeliveryMode,
+    telegramPollingTimeoutSeconds: readNumber("TELEGRAM_POLLING_TIMEOUT_SECONDS", 30),
   };
 }

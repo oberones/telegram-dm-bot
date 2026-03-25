@@ -1,0 +1,23 @@
+services:
+  postgres:
+    restart: unless-stopped
+
+  migrate:
+    env_file:
+      - .env.compose.production
+
+  server:
+    env_file:
+      - .env.compose.production
+    environment:
+      APP_ENV: production
+      TELEGRAM_DELIVERY_MODE: webhook
+      COOKIE_SECURE: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  admin:
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped

@@ -1,0 +1,28 @@
+services:
+  postgres:
+    container_name: dungeon-master-bot-postgres
+    ports:
+      - "5432:5432"
+
+  migrate:
+    container_name: dungeon-master-bot-migrate
+    env_file:
+      - .env.compose.local
+
+  server:
+    container_name: dungeon-master-bot-server
+    env_file:
+      - .env.compose.local
+    environment:
+      APP_ENV: local
+      APP_BASE_URL: http://localhost:3000
+      ADMIN_BASE_URL: http://localhost:8080
+      TELEGRAM_DELIVERY_MODE: polling
+      COOKIE_SECURE: "false"
+    ports:
+      - "3000:3000"
+
+  admin:
+    container_name: dungeon-master-bot-admin
+    ports:
+      - "8080:80"

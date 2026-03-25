@@ -8,11 +8,7 @@ export type HealthResponse = {
 
 export type ReadyResponse = HealthResponse & {
   checks: {
-    database: "pending";
+    database: "pending" | "ok" | "error";
     rulesConfig: "pending";
   };
-};
-
-export type TelegramWebhookAck = {
-  ok: true;
 };

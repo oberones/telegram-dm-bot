@@ -13,9 +13,21 @@
     "dev": "npm run dev --workspace @dm-bot/server",
     "dev:admin": "npm run dev --workspace @dm-bot/admin",
     "dev:server": "npm run dev --workspace @dm-bot/server",
+    "docker:local:build": "docker compose -f compose.yaml -f compose.local.yaml build",
+    "docker:local:down": "docker compose -f compose.yaml -f compose.local.yaml down -v",
+    "docker:local:up": "docker compose -f compose.yaml -f compose.local.yaml up --build",
+    "docker:prod:build": "docker compose -f compose.yaml -f compose.production.yaml build",
+    "docker:prod:config": "docker compose -f compose.yaml -f compose.production.yaml config",
+    "migrate": "npm run migrate --workspace @dm-bot/db",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }

@@ -13,11 +13,20 @@ export function registerHealthRoutes(app: FastifyInstance) {
   });
 
   app.get("/ready", async (): Promise<ReadyResponse> => {
+    const databaseReady = await app.services.pingDatabase()
+      .then(() => "ok" as const)
+      .catch(() => "error" as const);
+
+    const checks = buildReadinessSnapshot();
+
     return {
       status: "ok",
       service: "dungeon-master-bot-server",
       timestamp: new Date().toISOString(),
-      checks: buildReadinessSnapshot(),
+      checks: {
+        ...checks,
+        database: databaseReady,
+      },
     };
   });
 }

@@ -15,6 +15,12 @@ It covers:
 - deployment workflow
 - rollback and recovery expectations
 
+The current recommended direction is **Docker-first deployment** using:
+
+- one shared base Compose file
+- small environment-specific override files
+- host nginx as the public reverse proxy in production
+
 It is the operational companion to:
 
 - [ARCHITECTURE.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ARCHITECTURE.md)
@@ -114,12 +120,13 @@ backend app
 For MVP and early Beta:
 
 - one server
-- one Postgres instance
-- one backend app process
-- one admin frontend build served behind nginx
-- optional separate worker process for match execution
+- one Postgres container
+- one migration job container
+- one backend app container
+- one admin frontend container
+- optional separate worker container later
 
-This is enough to ship a robust first version.
+This is enough to ship a robust first version and keeps local and production provisioning closely aligned.
 
 ---
 

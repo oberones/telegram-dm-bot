@@ -51,17 +51,17 @@ For this product, GA should mean:
 
 The recommended development path is:
 
-1. Phase 0: Product Definition and Rule Freezing
-2. Phase 1: Technical Foundation
-3. Phase 2: Data Model and Persistence
-4. Phase 3: Telegram Identity and Character Creation
-5. Phase 4: Combat Engine v1
-6. Phase 5: Dispute Workflow in Telegram
-7. Phase 6: Admin Panel v1
-8. Phase 7: Auditability, Moderation, and Recovery
-9. Phase 8: Alpha Release
-10. Phase 9: Beta Hardening
-11. Phase 10: GA Readiness and Launch
+1. [x] Phase 0: Product Definition and Rule Freezing
+2. [x] Phase 1: Technical Foundation
+3. [x] Phase 2: Data Model and Persistence
+4. [x] Phase 3: Telegram Identity and Character Creation
+5. [ ] Phase 4: Combat Engine v1
+6. [ ] Phase 5: Dispute Workflow in Telegram
+7. [ ] Phase 6: Admin Panel v1
+8. [ ] Phase 7: Auditability, Moderation, and Recovery
+9. [ ] Phase 8: Alpha Release
+10. [ ] Phase 9: Beta Hardening
+11. [ ] Phase 10: GA Readiness and Launch
 
 Each phase below includes:
 
@@ -72,9 +72,29 @@ Each phase below includes:
 - risks
 - exit criteria
 
+### Current Progress Snapshot
+
+Completed so far:
+
+- product, rules, architecture, bot-flow, admin, schema, deployment, and Docker planning documents
+- TypeScript workspace scaffold with server, admin, shared, domain, engine, and DB packages
+- initial PostgreSQL migration and typed DB access layer
+- first Telegram vertical slice for `/start`, `/create_character`, `/character`, and `/cancel`
+- Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
+
+Not completed yet:
+
+- combat engine
+- dispute lifecycle
+- real admin data/API flows
+- moderation and recovery workflows
+- release hardening
+
 ---
 
 ## 4. Phase 0: Product Definition and Rule Freezing
+
+Status: [x] Completed
 
 ### Objective
 
@@ -131,10 +151,10 @@ Define the content boundary:
 
 ### Deliverables
 
-- finalized [PROPOSAL.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/PROPOSAL.md)
-- MVP rules specification document
-- admin permissions matrix
-- release scope statement for Alpha, Beta, and GA
+- [x] finalized [PROPOSAL.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/PROPOSAL.md)
+- [x] MVP rules specification document in [RULES_SPEC.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/RULES_SPEC.md)
+- [x] admin permissions matrix in [ADMIN_PANEL.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ADMIN_PANEL.md)
+- [x] release scope statement for Alpha, Beta, and GA in [ROADMAP.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ROADMAP.md)
 
 ### Dependencies
 
@@ -155,6 +175,8 @@ Define the content boundary:
 ---
 
 ## 5. Phase 1: Technical Foundation
+
+Status: [x] Completed
 
 ### Objective
 
@@ -204,10 +226,10 @@ Define:
 
 ### Deliverables
 
-- initial app skeleton
-- shared config module
-- local dev startup flow
-- production deployment notes
+- [x] initial app skeleton
+- [x] shared config module
+- [x] local dev startup flow
+- [x] production deployment notes
 
 ### Dependencies
 
@@ -228,6 +250,8 @@ Define:
 ---
 
 ## 6. Phase 2: Data Model and Persistence
+
+Status: [x] Completed
 
 ### Objective
 
@@ -276,10 +300,10 @@ Add:
 
 ### Deliverables
 
-- database schema
-- migration files
-- typed persistence layer
-- initial seed/bootstrap flow
+- [x] database schema in [SCHEMA.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/SCHEMA.md)
+- [x] migration files in [packages/db/migrations/0001_initial.sql](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/packages/db/migrations/0001_initial.sql)
+- [x] typed persistence layer
+- [ ] initial seed/bootstrap flow
 
 ### Dependencies
 
@@ -299,6 +323,8 @@ Add:
 ---
 
 ## 7. Phase 3: Telegram Identity and Character Creation
+
+Status: [x] Completed
 
 ### Objective
 
@@ -344,10 +370,10 @@ Implement:
 
 ### Deliverables
 
-- connected Telegram bot
-- create-character flow
-- view-character flow
-- user and character creation from Telegram
+- [x] connected Telegram bot
+- [x] create-character flow
+- [x] view-character flow
+- [x] user and character creation from Telegram
 
 ### Dependencies
 
@@ -367,6 +393,8 @@ Implement:
 ---
 
 ## 8. Phase 4: Combat Engine v1
+
+Status: [ ] Not started
 
 ### Objective
 
@@ -445,6 +473,8 @@ Ensure:
 
 ## 9. Phase 5: Dispute Workflow in Telegram
 
+Status: [ ] Not started
+
 ### Objective
 
 Turn the engine into a complete arbitration experience inside Telegram.
@@ -513,6 +543,8 @@ Implement:
 
 ## 10. Phase 6: Admin Panel v1
 
+Status: [ ] In progress
+
 ### Objective
 
 Deliver the first browser-based operational interface so the system is manageable without terminal or database access.
@@ -554,10 +586,10 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 
 ### Deliverables
 
-- admin login
-- dashboard
-- detail pages for core entities
-- initial management tooling
+- [ ] admin login
+- [ ] dashboard
+- [ ] detail pages for core entities
+- [ ] initial management tooling
 
 ### Dependencies
 
@@ -578,6 +610,8 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 ---
 
 ## 11. Phase 7: Auditability, Moderation, and Recovery
+
+Status: [ ] Not started
 
 ### Objective
 
@@ -646,6 +680,8 @@ Implement:
 ---
 
 ## 12. Phase 8: Alpha Release
+
+Status: [ ] Not started
 
 ### Objective
 
@@ -720,6 +756,8 @@ Validate:
 
 ## 13. Phase 9: Beta Hardening
 
+Status: [ ] Not started
+
 ### Objective
 
 Improve reliability, performance, usability, and supportability until the product is ready for wider production use.
@@ -791,6 +829,8 @@ Increase coverage across:
 ---
 
 ## 14. Phase 10: GA Readiness and Launch
+
+Status: [ ] Not started
 
 ### Objective
 
