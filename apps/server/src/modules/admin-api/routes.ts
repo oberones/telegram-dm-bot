@@ -20,13 +20,78 @@ import {
   setUserStatus,
 } from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
+import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth, requireAdminRole } from "../../lib/admin-auth.js";
 import { explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
 
-export function registerAdminApiRoutes(app: FastifyInstance) {
+type AdminRouteAuthContext = {
+  adminUser: {
+    id: string;
+    role: "super_admin" | "operator" | "moderator";
+    email: string;
+    display_name: string;
+  };
+  sessionId: string;
+};
+
+type AdminRouteDeps = {
+  getAdminAuthContext: typeof getAdminAuthContext;
+  loginAdmin: typeof loginAdmin;
+  logoutAdmin: typeof logoutAdmin;
+  requireAdminAuth: (
+    app: FastifyInstance,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => Promise<AdminRouteAuthContext | null>;
+  requireAdminRole: typeof requireAdminRole;
+  getDashboardCounts: typeof getDashboardCounts;
+  listMatches: typeof listMatches;
+  listDisputes: typeof listDisputes;
+  getDisputeById: typeof getDisputeById;
+  cancelPendingDisputeByAdmin: typeof cancelPendingDisputeByAdmin;
+  listUsers: typeof listUsers;
+  listCharacters: typeof listCharacters;
+  listAuditLogs: typeof listAuditLogs;
+  setUserStatus: typeof setUserStatus;
+  setCharacterStatus: typeof setCharacterStatus;
+  createAuditLog: typeof createAuditLog;
+  listMatchParticipants: typeof listMatchParticipants;
+  cancelMatchByAdmin: typeof cancelMatchByAdmin;
+  finalizeMatchByAdmin: typeof finalizeMatchByAdmin;
+  getUserById: typeof getUserById;
+  getMatchById: typeof getMatchById;
+  listMatchEvents: typeof listMatchEvents;
+};
+
+const defaultDeps: AdminRouteDeps = {
+  getAdminAuthContext,
+  loginAdmin,
+  logoutAdmin,
+  requireAdminAuth,
+  requireAdminRole,
+  getDashboardCounts,
+  listMatches,
+  listDisputes,
+  getDisputeById,
+  cancelPendingDisputeByAdmin,
+  listUsers,
+  listCharacters,
+  listAuditLogs,
+  setUserStatus,
+  setCharacterStatus,
+  createAuditLog,
+  listMatchParticipants,
+  cancelMatchByAdmin,
+  finalizeMatchByAdmin,
+  getUserById,
+  getMatchById,
+  listMatchEvents,
+};
+
+export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDeps = defaultDeps) {
   app.get("/api/session", async (request, reply) => {
-    const auth = await getAdminAuthContext(app, request);
+    const auth = await deps.getAdminAuthContext(app, request);
 
     if (!auth) {
       reply.code(401);
@@ -56,15 +121,15 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    return loginAdmin(app, request, reply, body.email, body.password);
+    return deps.loginAdmin(app, request, reply, body.email, body.password);
   });
 
   app.post("/api/logout", async (request, reply) => {
-    return logoutAdmin(app, request, reply);
+    return deps.logoutAdmin(app, request, reply);
   });
 
   app.get("/api/dashboard", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -72,7 +137,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    const stats = await getDashboardCounts().catch(() => ({
+    const stats = await deps.getDashboardCounts().catch(() => ({
       pendingDisputes: 0,
       runningMatches: 0,
       failedMatches: 0,
@@ -89,7 +154,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/matches", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -98,7 +163,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      matches: (await listMatches()).map((match) => ({
+      matches: (await deps.listMatches()).map((match) => ({
         ...match,
         recovery_hint: explainFlaggedMatch({
           status: match.status,
@@ -110,7 +175,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/disputes", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -119,7 +184,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      disputes: (await listDisputes()).map((dispute) => ({
+      disputes: (await deps.listDisputes()).map((dispute) => ({
         ...dispute,
         recovery_hint: explainFlaggedDispute(dispute.status),
       })),
@@ -127,7 +192,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/disputes/:id/cancel", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -135,7 +200,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
       reply.code(403);
       return { error: "Your role cannot cancel disputes" };
     }
@@ -149,21 +214,21 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "A cancellation reason is required" };
     }
 
-    const existingDispute = await getDisputeById(id);
+    const existingDispute = await deps.getDisputeById(id);
 
     if (!existingDispute) {
       reply.code(404);
       return { error: "Dispute not found" };
     }
 
-    const dispute = await cancelPendingDisputeByAdmin(id);
+    const dispute = await deps.cancelPendingDisputeByAdmin(id);
 
     if (!dispute) {
       reply.code(409);
       return { error: "Only pending disputes can be cancelled" };
     }
 
-    await createAuditLog({
+    await deps.createAuditLog({
       actorType: "admin_user",
       actorAdminUserId: auth.adminUser.id,
       action: "dispute_cancelled_by_admin",
@@ -177,8 +242,8 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     });
 
     const [challengerUser, targetUser] = await Promise.all([
-      getUserById(dispute.challenger_user_id),
-      getUserById(dispute.target_user_id),
+      deps.getUserById(dispute.challenger_user_id),
+      deps.getUserById(dispute.target_user_id),
     ]);
 
     const notificationText = [
@@ -205,7 +270,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/matches/:id/cancel", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -213,7 +278,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
       reply.code(403);
       return { error: "Your role cannot cancel matches" };
     }
@@ -227,15 +292,15 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "A cancellation reason is required" };
     }
 
-    const participants = await listMatchParticipants(id);
-    const match = await cancelMatchByAdmin({ matchId: id, reason });
+    const participants = await deps.listMatchParticipants(id);
+    const match = await deps.cancelMatchByAdmin({ matchId: id, reason });
 
     if (!match) {
       reply.code(409);
       return { error: "Only queued, running, or errored matches can be cancelled" };
     }
 
-    await createAuditLog({
+    await deps.createAuditLog({
       actorType: "admin_user",
       actorAdminUserId: auth.adminUser.id,
       action: "match_cancelled_by_admin",
@@ -253,7 +318,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     ].join("\n");
 
     for (const participant of participants) {
-      const user = await getUserById(participant.user_id);
+      const user = await deps.getUserById(participant.user_id);
 
       if (user) {
         await app.telegram.sendMessage(user.telegram_user_id, {
@@ -268,7 +333,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/matches/:id/finalize", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -276,7 +341,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
       reply.code(403);
       return { error: "Your role cannot finalize matches" };
     }
@@ -291,14 +356,14 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "A winner and finalization reason are required" };
     }
 
-    const participants = await listMatchParticipants(id);
+    const participants = await deps.listMatchParticipants(id);
 
     if (!participants.some((participant) => participant.character_id === winnerCharacterId)) {
       reply.code(400);
       return { error: "Selected winner is not a participant in this match" };
     }
 
-    const match = await finalizeMatchByAdmin({
+    const match = await deps.finalizeMatchByAdmin({
       matchId: id,
       winnerCharacterId,
       reason,
@@ -311,7 +376,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
 
     const winner = participants.find((participant) => participant.character_id === winnerCharacterId);
 
-    await createAuditLog({
+    await deps.createAuditLog({
       actorType: "admin_user",
       actorAdminUserId: auth.adminUser.id,
       action: "match_finalized_by_admin",
@@ -331,7 +396,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     ].join("\n");
 
     for (const participant of participants) {
-      const user = await getUserById(participant.user_id);
+      const user = await deps.getUserById(participant.user_id);
 
       if (user) {
         await app.telegram.sendMessage(user.telegram_user_id, {
@@ -346,7 +411,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/users", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -355,12 +420,12 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      users: await listUsers(),
+      users: await deps.listUsers(),
     };
   });
 
   app.get("/api/characters", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -369,12 +434,12 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      characters: await listCharacters(),
+      characters: await deps.listCharacters(),
     };
   });
 
   app.get("/api/audit-logs", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -383,12 +448,12 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      auditLogs: await listAuditLogs(),
+      auditLogs: await deps.listAuditLogs(),
     };
   });
 
   app.post("/api/users/:id/status", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -396,7 +461,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
       reply.code(403);
       return { error: "Your role cannot change user status" };
     }
@@ -414,7 +479,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "A suspension reason is required" };
     }
 
-    const user = await setUserStatus({
+    const user = await deps.setUserStatus({
       userId: id,
       status: body.status,
       suspendedReason: body.reason?.trim() ?? null,
@@ -425,7 +490,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "User not found" };
     }
 
-    await createAuditLog({
+    await deps.createAuditLog({
       actorType: "admin_user",
       actorAdminUserId: auth.adminUser.id,
       action: body.status === "suspended" ? "user_suspended" : "user_activated",
@@ -444,7 +509,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/characters/:id/status", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -452,7 +517,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
-    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
       reply.code(403);
       return { error: "Your role cannot change character status" };
     }
@@ -470,7 +535,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "A freeze reason is required" };
     }
 
-    const character = await setCharacterStatus({
+    const character = await deps.setCharacterStatus({
       characterId: id,
       status: body.status,
       frozenReason: body.reason?.trim() ?? null,
@@ -481,7 +546,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return { error: "Character not found" };
     }
 
-    await createAuditLog({
+    await deps.createAuditLog({
       actorType: "admin_user",
       actorAdminUserId: auth.adminUser.id,
       action: body.status === "frozen" ? "character_frozen" : "character_activated",
@@ -500,7 +565,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/matches/:id", async (request, reply) => {
-    const auth = await requireAdminAuth(app, request, reply);
+    const auth = await deps.requireAdminAuth(app, request, reply);
 
     if (!auth) {
       return {
@@ -509,7 +574,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     const { id } = request.params as { id: string };
-    const match = await getMatchById(id);
+    const match = await deps.getMatchById(id);
 
     if (!match) {
       return {
@@ -519,8 +584,8 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
 
     return {
       match,
-      participants: await listMatchParticipants(id),
-      events: await listMatchEvents(id),
+      participants: await deps.listMatchParticipants(id),
+      events: await deps.listMatchEvents(id),
       recovery_hint: explainFlaggedMatch({
         status: match.status,
         endReason: match.end_reason,
