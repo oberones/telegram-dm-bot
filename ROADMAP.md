@@ -58,7 +58,7 @@ The recommended development path is:
 5. [x] Phase 4: Combat Engine v1
 6. [x] Phase 5: Dispute Workflow in Telegram
 7. [x] Phase 6: Admin Panel v1
-8. [ ] Phase 7: Auditability, Moderation, and Recovery
+8. [x] Phase 7: Auditability, Moderation, and Recovery
 9. [ ] Phase 8: Alpha Release
 10. [ ] Phase 9: Beta Hardening
 11. [ ] Phase 10: GA Readiness and Launch
@@ -87,11 +87,13 @@ Completed so far:
 - initial recovery controls for pending-dispute cancellation and flagged-match cancel/finalize flows
 - server-side recovery-hint tests plus engine tests
 - documented backup and restore runbook in [BACKUP_RESTORE_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BACKUP_RESTORE_RUNBOOK.md)
+- restore rehearsal confirmed against a non-production database
+- initial alpha planning document in [ALPHA_TEST_PLAN.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_TEST_PLAN.md)
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- restore rehearsal against a non-production database
+- alpha deployment and operator rehearsal
 - broader API/bot integration test coverage
 - release hardening
 
@@ -616,7 +618,7 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 
 ## 11. Phase 7: Auditability, Moderation, and Recovery
 
-Status: [ ] In progress
+Status: [x] Completed
 
 ### Objective
 
@@ -686,7 +688,7 @@ Implement:
 
 ## 12. Phase 8: Alpha Release
 
-Status: [ ] Not started
+Status: [ ] In progress
 
 ### Objective
 

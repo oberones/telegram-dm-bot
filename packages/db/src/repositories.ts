@@ -1173,7 +1173,11 @@ export async function setCharacterStatus(params: {
           loadout,
           resource_state
       `,
-      [params.characterId, params.status, params.status === "frozen" ? params.frozenReason ?? null : null],
+      [
+        params.characterId,
+        params.status,
+        params.status === "frozen" ? params.frozenReason ?? null : null,
+      ],
     );
 
     return result.rows[0] ?? null;

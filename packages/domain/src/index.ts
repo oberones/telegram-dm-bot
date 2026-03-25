@@ -16,6 +16,7 @@ import {
   getUserByTelegramUserId,
   getUserByUsername,
   resolvePendingDispute,
+  setCharacterStatus,
   upsertActiveSession,
   upsertTelegramUser,
   type CharacterRecord,
@@ -207,6 +208,7 @@ function startButtons(hasCharacter: boolean) {
     return [
       [{ text: "View Character", callback_data: "nav:character" }],
       [{ text: "Create Character", callback_data: "nav:create_character" }],
+      [{ text: "Delete Character", callback_data: "nav:delete_character" }],
       [{ text: "Help", callback_data: "nav:help" }],
     ];
   }
@@ -279,6 +281,7 @@ function helpText() {
     "/help",
     "/create_character",
     "/character",
+    "/delete_character",
     "/record",
     "/history",
     "/dispute @username reason",
@@ -491,6 +494,102 @@ export async function handleCharacter(actor: TelegramActor): Promise<OutboundMes
   return {
     text: formatCharacterSummary(character),
     replyMarkup: {
+      inline_keyboard: [
+        [{ text: "Create Character", callback_data: "nav:create_character" }],
+        [{ text: "Delete Character", callback_data: "nav:delete_character" }],
+      ],
+    },
+  };
+}
+
+export async function handleDeleteCharacterPrompt(actor: TelegramActor): Promise<OutboundMessage> {
+  const user = await ensureUser(actor);
+  const character = await getActiveCharacterByUserId(user.id);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
+  if (!character) {
+    return {
+      text: "You do not have a character to delete right now.",
+      replyMarkup: {
+        inline_keyboard: startButtons(false),
+      },
+    };
+  }
+
+  return {
+    text: [
+      `Delete ${character.name}?`,
+      "",
+      "This will retire your current character from future use.",
+      "Historical disputes and match records will remain intact.",
+      "This cannot be undone from Telegram.",
+    ].join("\n"),
+    replyMarkup: {
+      inline_keyboard: [
+        [{ text: "Confirm Delete", callback_data: "character:delete:confirm" }],
+        [{ text: "Keep Character", callback_data: "character:delete:cancel" }],
+      ],
+    },
+  };
+}
+
+export async function handleDeleteCharacterConfirm(actor: TelegramActor): Promise<OutboundMessage> {
+  const user = await ensureUser(actor);
+  const character = await getActiveCharacterByUserId(user.id);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
+  if (!character) {
+    return {
+      text: "You do not have a character to delete right now.",
+      replyMarkup: {
+        inline_keyboard: startButtons(false),
+      },
+    };
+  }
+
+  const retiredCharacter = await setCharacterStatus({
+    characterId: character.id,
+    status: "retired",
+  });
+
+  if (!retiredCharacter) {
+    return {
+      text: "Your character could not be deleted right now. Please try again.",
+    };
+  }
+
+  await cancelActiveSession(user.id);
+
+  await createAuditLog({
+    actorType: "user",
+    actorUserId: user.id,
+    action: "character_deleted",
+    targetType: "character",
+    targetId: character.id,
+    metadata: {
+      characterName: character.name,
+      previousStatus: character.status,
+      nextStatus: "retired",
+    },
+  });
+
+  return {
+    text: [
+      `${character.name} has been retired.`,
+      "",
+      "You can create a new character whenever you're ready.",
+    ].join("\n"),
+    replyMarkup: {
       inline_keyboard: [[{ text: "Create Character", callback_data: "nav:create_character" }]],
     },
   };
@@ -629,6 +728,12 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
     };
   }
 
+  if (callbackData === "nav:delete_character") {
+    return {
+      message: await handleDeleteCharacterPrompt(actor),
+    };
+  }
+
   if (callbackData === "nav:character") {
     return {
       message: await handleCharacter(actor),
@@ -638,6 +743,20 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
   if (callbackData === "nav:help") {
     return {
       message: await handleHelp(),
+    };
+  }
+
+  if (callbackData === "character:delete:confirm") {
+    return {
+      alertText: "Character deleted",
+      message: await handleDeleteCharacterConfirm(actor),
+    };
+  }
+
+  if (callbackData === "character:delete:cancel") {
+    return {
+      alertText: "Deletion cancelled",
+      message: await handleCharacter(actor),
     };
   }
 

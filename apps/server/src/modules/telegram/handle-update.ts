@@ -6,6 +6,8 @@ import {
   handleCancel,
   handleCharacter,
   handleCreateCharacter,
+  handleDeleteCharacterConfirm,
+  handleDeleteCharacterPrompt,
   handleDisputeCommand,
   handleHistory,
   handleHelp,
@@ -96,6 +98,18 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
     }
 
     await app.telegram.sendMessage(chatId, await handleCharacter(actor));
+    return;
+  }
+
+  if (normalizedCommand === "/delete_character") {
+    if (!isPrivateChat) {
+      await app.telegram.sendMessage(chatId, {
+        text: "Character deletion works in DM right now. Open a private chat with the bot and send /delete_character there.",
+      });
+      return;
+    }
+
+    await app.telegram.sendMessage(chatId, await handleDeleteCharacterPrompt(actor));
     return;
   }
 
