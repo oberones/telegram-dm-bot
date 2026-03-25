@@ -12,6 +12,9 @@ build:
 test-engine:
 	npm run test:engine
 
+test-server:
+	npm run test:server
+
 migrate:
 	npm run migrate
 

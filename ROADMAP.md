@@ -82,13 +82,17 @@ Completed so far:
 - first Telegram vertical slice for `/start`, `/create_character`, `/character`, and `/cancel`
 - deterministic combat engine with persisted event logs and automated tests
 - end-to-end dispute flow with accept/decline, group targeting, match persistence, `/record`, and `/history`
-- read-only admin APIs and browser views for dashboard, disputes, matches, users, and characters
+- protected admin APIs and browser views for dashboard, disputes, matches, users, characters, recovery, and audit logs
+- initial moderation controls for user suspension and character freeze/unfreeze
+- initial recovery controls for pending-dispute cancellation and flagged-match cancel/finalize flows
+- server-side recovery-hint tests plus engine tests
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- admin auth and write-side admin controls
-- moderation and recovery workflows
+- full audit log coverage across all bot/system actions
+- backup and restore runbooks
+- broader API/bot integration test coverage
 - release hardening
 
 ---
@@ -658,10 +662,10 @@ Implement:
 
 ### Deliverables
 
-- full audit log coverage
-- moderation controls
-- recovery tools
-- backup and restore runbook
+- [ ] full audit log coverage
+- [x] moderation controls
+- [x] recovery tools
+- [ ] backup and restore runbook
 
 ### Dependencies
 

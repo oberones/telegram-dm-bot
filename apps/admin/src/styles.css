@@ -291,6 +291,10 @@ button.list-row {
   margin: 6px 0 0;
 }
 
+.muted-copy {
+  color: var(--muted);
+}
+
 .table-wrap {
   overflow-x: auto;
 }

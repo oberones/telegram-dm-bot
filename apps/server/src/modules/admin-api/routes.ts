@@ -22,6 +22,7 @@ import {
 import { previewMatchResolution } from "@dm-bot/domain";
 
 import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth, requireAdminRole } from "../../lib/admin-auth.js";
+import { explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
 
 export function registerAdminApiRoutes(app: FastifyInstance) {
   app.get("/api/session", async (request, reply) => {
@@ -97,7 +98,14 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      matches: await listMatches(),
+      matches: (await listMatches()).map((match) => ({
+        ...match,
+        recovery_hint: explainFlaggedMatch({
+          status: match.status,
+          endReason: match.end_reason,
+          errorSummary: match.error_summary ?? null,
+        }),
+      })),
     };
   });
 
@@ -111,7 +119,10 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     }
 
     return {
-      disputes: await listDisputes(),
+      disputes: (await listDisputes()).map((dispute) => ({
+        ...dispute,
+        recovery_hint: explainFlaggedDispute(dispute.status),
+      })),
     };
   });
 
@@ -510,6 +521,11 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       match,
       participants: await listMatchParticipants(id),
       events: await listMatchEvents(id),
+      recovery_hint: explainFlaggedMatch({
+        status: match.status,
+        endReason: match.end_reason,
+        errorSummary: match.error_summary ?? null,
+      }),
     };
   });
 }

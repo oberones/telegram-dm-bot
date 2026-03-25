@@ -19,6 +19,7 @@
     "docker:prod:build": "docker compose -f compose.yaml -f compose.production.yaml build",
     "docker:prod:config": "docker compose -f compose.yaml -f compose.production.yaml config",
     "migrate": "npm run migrate --workspace @dm-bot/db",
+    "test:server": "npm run test --workspace @dm-bot/server",
     "test:engine": "npm run test --workspace @dm-bot/engine",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

@@ -1,5 +1,6 @@
 import {
   cancelActiveSession,
+  createAuditLog,
   createCharacterAndCompleteSession,
   createPendingDispute,
   declinePendingDispute,
@@ -779,6 +780,19 @@ export async function handleTextMessage(
     resourceState: template.resourceState,
   });
 
+  await createAuditLog({
+    actorType: "user",
+    actorUserId: user.id,
+    action: "character_created",
+    targetType: "character",
+    targetId: character.id,
+    metadata: {
+      characterName: character.name,
+      classKey: character.class_key,
+      level: character.level,
+    },
+  });
+
   return {
     text: [
       "Your character is ready.",
@@ -890,6 +904,22 @@ export async function handleDisputeCommand(params: {
     challengerCharacterId: challengerCharacter.id,
     targetCharacterId: targetCharacter.id,
     reason: normalizedReason,
+  });
+
+  await createAuditLog({
+    actorType: "user",
+    actorUserId: challenger.id,
+    action: "dispute_created",
+    targetType: "dispute",
+    targetId: dispute.id,
+    reason: dispute.reason,
+    metadata: {
+      challengerCharacterId: challengerCharacter.id,
+      challengerCharacterName: challengerCharacter.name,
+      targetUserId: targetUser.id,
+      targetCharacterId: targetCharacter.id,
+      targetCharacterName: targetCharacter.name,
+    },
   });
 
   return {
@@ -1019,8 +1049,10 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
     config: rulesConfigSnapshot(),
   });
 
+  let resolvedMatchId: string | null = null;
+
   try {
-    await resolvePendingDispute({
+    const persisted = await resolvePendingDispute({
       disputeId: dispute.id,
       targetUserId: targetUser.id,
       rulesVersionId: rulesVersion.id,
@@ -1035,6 +1067,8 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
         toPersistedEvent(event, challengerCharacter.id, targetCharacter.id, index + 1),
       ),
     });
+
+    resolvedMatchId = persisted.match.id;
   } catch {
     return {
       message: {
@@ -1050,6 +1084,37 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
       ],
     };
   }
+
+  await createAuditLog({
+    actorType: "user",
+    actorUserId: targetUser.id,
+    action: "dispute_accepted",
+    targetType: "dispute",
+    targetId: dispute.id,
+    reason: dispute.reason,
+    metadata: {
+      challengerUserId: challengerUser.id,
+      challengerCharacterId: challengerCharacter.id,
+      targetCharacterId: targetCharacter.id,
+    },
+  });
+
+  await createAuditLog({
+    actorType: "system",
+    action: "match_completed",
+    targetType: "match",
+    targetId: resolvedMatchId,
+    reason: dispute.reason,
+    metadata: {
+      disputeId: dispute.id,
+      winnerCharacterId:
+        result.winnerParticipantSlot === 1 ? challengerCharacter.id : targetCharacter.id,
+      winnerCharacterName:
+        result.winnerParticipantSlot === 1 ? challengerCharacter.name : targetCharacter.name,
+      endReason: result.endReason,
+      roundsCompleted: result.roundsCompleted,
+    },
+  });
 
   const summary = buildMatchSummary(
     challengerCharacter,
@@ -1154,6 +1219,20 @@ export async function handleDecline(
 
   const declined = await declinePendingDispute(dispute.id, user.id);
   const challenger = await getUserById(dispute.challenger_user_id);
+
+  if (declined) {
+    await createAuditLog({
+      actorType: "user",
+      actorUserId: user.id,
+      action: "dispute_declined",
+      targetType: "dispute",
+      targetId: dispute.id,
+      reason: dispute.reason,
+      metadata: {
+        challengerUserId: dispute.challenger_user_id,
+      },
+    });
+  }
 
   return {
     message: {

@@ -31,6 +31,7 @@ type DisputeSummary = {
   target_display_name: string;
   challenger_character_name: string;
   target_character_name: string;
+  recovery_hint: string;
 };
 
 type UserSummary = {
@@ -70,6 +71,9 @@ type MatchSummary = {
   completed_at: string | null;
   challenger_character_name: string;
   target_character_name: string;
+  error_summary?: string | null;
+  admin_finalization_reason?: string | null;
+  recovery_hint: string;
 };
 
 type MatchParticipant = {
@@ -93,17 +97,20 @@ type MatchDetailResponse = {
   match: MatchSummary;
   participants: MatchParticipant[];
   events: MatchEvent[];
+  recovery_hint: string;
 };
 
 type AuditLog = {
   id: string;
   actor_type: string;
+  actor_user_id: string | null;
   action: string;
   target_type: string;
   target_id: string | null;
   reason: string | null;
   created_at: string;
   admin_display_name: string | null;
+  user_display_name: string | null;
 };
 
 type AdminData = {
@@ -630,6 +637,7 @@ export function App() {
                   </strong>
                   <span>{formatDate(dispute.created_at)}</span>
                   <p>{dispute.reason}</p>
+                  <p className="muted-copy">{dispute.recovery_hint}</p>
                   <div className="inline-actions">
                     <button
                       className="table-action"
@@ -667,6 +675,7 @@ export function App() {
                     <p>
                       Winner: {match.winner_character_name ?? "pending"} | {capitalize(match.end_reason ?? "unknown")}
                     </p>
+                    <p className="muted-copy">{match.recovery_hint}</p>
                     <div className="inline-actions">
                       <button
                         className="table-action"
@@ -814,7 +823,7 @@ export function App() {
                 {data.auditLogs.map((entry) => (
                   <tr key={entry.id}>
                     <td>{formatDate(entry.created_at)}</td>
-                    <td>{entry.admin_display_name ?? entry.actor_type}</td>
+                    <td>{entry.admin_display_name ?? entry.user_display_name ?? entry.actor_type}</td>
                     <td>{capitalize(entry.action)}</td>
                     <td>
                       {entry.target_type}
@@ -884,6 +893,19 @@ export function App() {
                     <strong>{matchDetail.match.rounds_completed}</strong>
                   </div>
                 </div>
+
+                <section className="subsection">
+                  <h3>Recovery signal</h3>
+                  <p className="muted-copy">{matchDetail.recovery_hint}</p>
+                  {matchDetail.match.error_summary ? (
+                    <p className="muted-copy">Stored error: {matchDetail.match.error_summary}</p>
+                  ) : null}
+                  {matchDetail.match.admin_finalization_reason ? (
+                    <p className="muted-copy">
+                      Admin finalization note: {matchDetail.match.admin_finalization_reason}
+                    </p>
+                  ) : null}
+                </section>
 
                 <section className="subsection">
                   <h3>Participants</h3>

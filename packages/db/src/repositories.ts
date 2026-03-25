@@ -58,6 +58,8 @@ export type MatchRecord = {
   rounds_completed?: number;
   created_at?: Date;
   completed_at?: Date | null;
+  error_summary?: string | null;
+  admin_finalization_reason?: string | null;
 };
 
 export type AdminUserRecord = {
@@ -100,6 +102,8 @@ export type AdminMatchListRecord = {
   rounds_completed: number;
   created_at: Date;
   completed_at: Date | null;
+  error_summary: string | null;
+  admin_finalization_reason: string | null;
   challenger_character_name: string;
   target_character_name: string;
   winner_character_name: string | null;
@@ -121,6 +125,7 @@ export type MatchParticipantRecord = {
 export type AuditLogRecord = {
   id: string;
   actor_type: string;
+  actor_user_id: string | null;
   actor_admin_user_id: string | null;
   action: string;
   target_type: string;
@@ -129,6 +134,7 @@ export type AuditLogRecord = {
   metadata: Record<string, unknown>;
   created_at: Date;
   admin_display_name: string | null;
+  user_display_name: string | null;
 };
 
 export type MatchEventRecord = {
@@ -168,6 +174,10 @@ export type UserDisputeSummaryRecord = {
   target_display_name: string;
   challenger_character_name: string;
   target_character_name: string;
+  accepted_at?: Date | null;
+  declined_at?: Date | null;
+  cancelled_at?: Date | null;
+  expired_at?: Date | null;
 };
 
 export type BotSessionRecord = {
@@ -1172,6 +1182,7 @@ export async function setCharacterStatus(params: {
 
 export async function createAuditLog(params: {
   actorType: string;
+  actorUserId?: string | null;
   actorAdminUserId?: string | null;
   action: string;
   targetType: string;
@@ -1184,6 +1195,7 @@ export async function createAuditLog(params: {
       `
         INSERT INTO audit_logs (
           actor_type,
+          actor_user_id,
           actor_admin_user_id,
           action,
           target_type,
@@ -1195,6 +1207,7 @@ export async function createAuditLog(params: {
       `,
       [
         params.actorType,
+        params.actorUserId ?? null,
         params.actorAdminUserId ?? null,
         params.action,
         params.targetType,
@@ -1213,6 +1226,7 @@ export async function listAuditLogs(limit = 50): Promise<AuditLogRecord[]> {
         SELECT
           a.id,
           a.actor_type,
+          a.actor_user_id,
           a.actor_admin_user_id,
           a.action,
           a.target_type,
@@ -1220,10 +1234,13 @@ export async function listAuditLogs(limit = 50): Promise<AuditLogRecord[]> {
           a.reason,
           a.metadata,
           a.created_at,
-          au.display_name AS admin_display_name
+          au.display_name AS admin_display_name,
+          u.display_name AS user_display_name
         FROM audit_logs a
         LEFT JOIN admin_users au
           ON au.id = a.actor_admin_user_id
+        LEFT JOIN users u
+          ON u.id = a.actor_user_id
         ORDER BY a.created_at DESC
         LIMIT $1
       `,
@@ -1247,6 +1264,8 @@ export async function listMatches(limit = 50): Promise<AdminMatchListRecord[]> {
           m.rounds_completed,
           m.created_at,
           m.completed_at,
+          m.error_summary,
+          m.admin_finalization_reason,
           challenger_character.name AS challenger_character_name,
           target_character.name AS target_character_name,
           winner_character.name AS winner_character_name
@@ -1273,7 +1292,17 @@ export async function getMatchById(matchId: string): Promise<MatchRecord | null>
   return withTransaction(async (client) => {
     const result = await client.query<MatchRecord>(
       `
-        SELECT id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
+        SELECT
+          id,
+          dispute_id,
+          status,
+          winner_character_id,
+          end_reason,
+          rounds_completed,
+          created_at,
+          completed_at,
+          error_summary,
+          admin_finalization_reason
         FROM matches
         WHERE id = $1
         LIMIT 1
@@ -1465,6 +1494,10 @@ export async function listRecentDisputesForUser(
           d.status,
           d.reason,
           d.created_at,
+          d.accepted_at,
+          d.declined_at,
+          d.cancelled_at,
+          d.expired_at,
           d.challenger_user_id,
           d.target_user_id,
           challenger.display_name AS challenger_display_name,
@@ -1501,6 +1534,10 @@ export async function listDisputes(limit = 50): Promise<UserDisputeSummaryRecord
           d.status,
           d.reason,
           d.created_at,
+          d.accepted_at,
+          d.declined_at,
+          d.cancelled_at,
+          d.expired_at,
           d.challenger_user_id,
           d.target_user_id,
           challenger.display_name AS challenger_display_name,
