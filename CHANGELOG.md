@@ -1,3 +1,10 @@
+## 0.4.0 (2026-03-25)
+
+### Feat
+
+- additional persistence with player-facing stats
+- working disputes in group chat
+
 ## 0.3.0 (2026-03-25)
 
 ### Feat
