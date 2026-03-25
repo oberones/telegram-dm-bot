@@ -5,6 +5,7 @@ import {
   declinePendingDispute,
   ensureRulesVersion,
   getActiveCharacterByUserId,
+  getEligibleCharacterByUserId,
   getActiveSessionByUserId,
   getPendingIncomingDisputes,
   getPendingOutgoingDisputes,
@@ -235,6 +236,7 @@ function formatCharacterSummary(character: CharacterRecord) {
     `Name: ${character.name}`,
     `Class: ${capitalize(character.class_key)}`,
     `Level: ${character.level}`,
+    `Status: ${capitalize(character.status)}`,
     `HP: ${derived.maxHp ?? "?"}`,
     `AC: ${derived.armorClass ?? "?"}`,
     `Record: ${character.wins}-${character.losses}`,
@@ -257,6 +259,14 @@ async function ensureUser(actor: TelegramActor) {
     telegramLastName: actor.telegramLastName,
     displayName: displayName(actor),
   });
+}
+
+function restrictedUserMessage() {
+  return "Your arena access is currently restricted. Please contact an administrator if you believe this is a mistake.";
+}
+
+function frozenCharacterMessage(character: CharacterRecord) {
+  return `${character.name} is currently frozen and cannot enter new disputes or be used for new arena actions.`;
 }
 
 function helpText() {
@@ -417,6 +427,15 @@ export async function handleStart(actor: TelegramActor): Promise<OutboundMessage
   const user = await ensureUser(actor);
   const character = await getActiveCharacterByUserId(user.id);
 
+  if (user.status !== "active") {
+    return {
+      text: [
+        `Welcome back, ${displayName(actor)}.`,
+        restrictedUserMessage(),
+      ].join("\n\n"),
+    };
+  }
+
   if (character) {
     return {
       text: [
@@ -453,6 +472,12 @@ export async function handleCharacter(actor: TelegramActor): Promise<OutboundMes
   const user = await ensureUser(actor);
   const character = await getActiveCharacterByUserId(user.id);
 
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
   if (!character) {
     return {
       text: "You do not have a character yet. Use /create_character to enter the arena.",
@@ -473,6 +498,12 @@ export async function handleCharacter(actor: TelegramActor): Promise<OutboundMes
 export async function handleRecord(actor: TelegramActor): Promise<OutboundMessage> {
   const user = await ensureUser(actor);
   const character = await getActiveCharacterByUserId(user.id);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
 
   if (!character) {
     return {
@@ -501,6 +532,13 @@ export async function handleRecord(actor: TelegramActor): Promise<OutboundMessag
 
 export async function handleHistory(actor: TelegramActor): Promise<OutboundMessage> {
   const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
   const disputes = await listRecentDisputesForUser(user.id, 8);
 
   if (disputes.length === 0) {
@@ -522,6 +560,13 @@ export async function handleHistory(actor: TelegramActor): Promise<OutboundMessa
 
 export async function handleCancel(actor: TelegramActor): Promise<OutboundMessage> {
   const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
   const cancelled = await cancelActiveSession(user.id);
 
   return {
@@ -535,11 +580,20 @@ export async function handleCreateCharacter(actor: TelegramActor): Promise<Outbo
   const user = await ensureUser(actor);
   const existingCharacter = await getActiveCharacterByUserId(user.id);
 
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
   if (existingCharacter) {
     return {
       text: [
-        "You already have an active character in v1.",
+        existingCharacter.status === "frozen"
+          ? "You already have a frozen character in v1."
+          : "You already have an active character in v1.",
         "",
+        ...(existingCharacter.status === "frozen" ? [frozenCharacterMessage(existingCharacter), ""] : []),
         formatCharacterSummary(existingCharacter),
       ].join("\n"),
     };
@@ -623,6 +677,15 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
   const user = await ensureUser(actor);
   const session = await getActiveSessionByUserId(user.id);
 
+  if (user.status !== "active") {
+    return {
+      alertText: "Arena access restricted",
+      message: {
+        text: restrictedUserMessage(),
+      },
+    };
+  }
+
   if (!session || session.flow_type !== "character_creation") {
     return {
       alertText: "This character creation session has expired. Start again with /create_character.",
@@ -660,6 +723,12 @@ export async function handleTextMessage(
   const user = await ensureUser(actor);
   const session = await getActiveSessionByUserId(user.id);
 
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
   if (!session || session.flow_type !== "character_creation" || session.step_key !== "awaiting_name") {
     return null;
   }
@@ -684,7 +753,10 @@ export async function handleTextMessage(
 
   if (existingCharacter) {
     return {
-      text: "You already have an active character. Use /character to view it.",
+      text:
+        existingCharacter.status === "frozen"
+          ? `${frozenCharacterMessage(existingCharacter)} Use /character to view it.`
+          : "You already have an active character. Use /character to view it.",
     };
   }
 
@@ -740,17 +812,21 @@ export async function handleDisputeCommand(params: {
   if (challenger.status !== "active") {
     return {
       message: {
-        text: "Your access to arena actions is currently restricted.",
+        text: restrictedUserMessage(),
       },
     };
   }
 
-  const challengerCharacter = await getActiveCharacterByUserId(challenger.id);
+  const challengerCharacter = await getEligibleCharacterByUserId(challenger.id);
 
   if (!challengerCharacter) {
+    const currentCharacter = await getActiveCharacterByUserId(challenger.id);
+
     return {
       message: {
-        text: "You need a character before you can start a dispute.",
+        text: currentCharacter
+          ? frozenCharacterMessage(currentCharacter)
+          : "You need a character before you can start a dispute.",
       },
     };
   }
@@ -776,12 +852,24 @@ export async function handleDisputeCommand(params: {
     };
   }
 
-  const targetCharacter = await getActiveCharacterByUserId(targetUser.id);
-
-  if (!targetCharacter) {
+  if (targetUser.status !== "active") {
     return {
       message: {
-        text: `${targetUser.display_name} does not have an active character yet.`,
+        text: `${targetUser.display_name} is not currently eligible for arena disputes.`,
+      },
+    };
+  }
+
+  const targetCharacter = await getEligibleCharacterByUserId(targetUser.id);
+
+  if (!targetCharacter) {
+    const currentTargetCharacter = await getActiveCharacterByUserId(targetUser.id);
+
+    return {
+      message: {
+        text: currentTargetCharacter
+          ? `${targetUser.display_name}'s character is currently frozen and cannot accept disputes.`
+          : `${targetUser.display_name} does not have an active character yet.`,
       },
     };
   }
@@ -883,6 +971,14 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
   const targetUser = await ensureUser(actor);
   const challengerUser = await getUserById(dispute.challenger_user_id);
 
+  if (targetUser.status !== "active") {
+    return {
+      message: {
+        text: restrictedUserMessage(),
+      },
+    };
+  }
+
   if (!challengerUser) {
     return {
       message: {
@@ -891,8 +987,16 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
     };
   }
 
-  const challengerCharacter = await getActiveCharacterByUserId(dispute.challenger_user_id);
-  const targetCharacter = await getActiveCharacterByUserId(targetUser.id);
+  if (challengerUser.status !== "active") {
+    return {
+      message: {
+        text: "The challenger is no longer eligible for this dispute.",
+      },
+    };
+  }
+
+  const challengerCharacter = await getEligibleCharacterByUserId(dispute.challenger_user_id);
+  const targetCharacter = await getEligibleCharacterByUserId(targetUser.id);
 
   if (!challengerCharacter || !targetCharacter) {
     return {
@@ -974,6 +1078,15 @@ export async function handleAccept(
   explicitDisputeId?: string,
 ): Promise<CommandResult> {
   const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      message: {
+        text: restrictedUserMessage(),
+      },
+    };
+  }
+
   const disputes = await getPendingIncomingDisputes(user.id);
 
   if (disputes.length === 0) {
@@ -1006,6 +1119,15 @@ export async function handleDecline(
   explicitDisputeId?: string,
 ): Promise<CommandResult> {
   const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      message: {
+        text: restrictedUserMessage(),
+      },
+    };
+  }
+
   const disputes = await getPendingIncomingDisputes(user.id);
 
   if (disputes.length === 0) {

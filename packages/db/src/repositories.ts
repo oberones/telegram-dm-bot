@@ -306,6 +306,37 @@ export async function getActiveCharacterByUserId(userId: string): Promise<Charac
   });
 }
 
+export async function getEligibleCharacterByUserId(userId: string): Promise<CharacterRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<CharacterRecord>(
+      `
+        SELECT
+          id,
+          user_id,
+          name,
+          class_key,
+          level,
+          status,
+          rules_version_id,
+          wins,
+          losses,
+          matches_played,
+          derived_stats,
+          ability_scores,
+          loadout,
+          resource_state
+        FROM characters
+        WHERE user_id = $1
+          AND status = 'active'
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function getActiveSessionByUserId(userId: string): Promise<BotSessionRecord | null> {
   return withTransaction(async (client) => {
     const result = await client.query<BotSessionRecord>(

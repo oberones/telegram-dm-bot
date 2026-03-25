@@ -16,7 +16,7 @@ import {
 } from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
 
-import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth } from "../../lib/admin-auth.js";
+import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth, requireAdminRole } from "../../lib/admin-auth.js";
 
 export function registerAdminApiRoutes(app: FastifyInstance) {
   app.get("/api/session", async (request, reply) => {
@@ -161,6 +161,11 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       };
     }
 
+    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+      reply.code(403);
+      return { error: "Your role cannot change user status" };
+    }
+
     const { id } = request.params as { id: string };
     const body = (request.body ?? {}) as { status?: "active" | "suspended"; reason?: string };
 
@@ -210,6 +215,11 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       return {
         error: "Unauthorized",
       };
+    }
+
+    if (!requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+      reply.code(403);
+      return { error: "Your role cannot change character status" };
     }
 
     const { id } = request.params as { id: string };

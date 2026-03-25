@@ -177,6 +177,11 @@ input {
   cursor: pointer;
 }
 
+.table-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .primary-button {
   background: var(--accent);
   color: #fff7ef;

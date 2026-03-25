@@ -180,6 +180,10 @@ function emptyAdminData(): AdminData {
   };
 }
 
+function canModerate(role: string | undefined) {
+  return role === "super_admin" || role === "operator";
+}
+
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [view, setView] = useState<ViewKey>("dashboard");
@@ -397,6 +401,7 @@ export function App() {
   }
 
   const stats = data.dashboard?.stats;
+  const moderationEnabled = canModerate(session.adminUser?.role);
 
   return (
     <main className="shell">
@@ -564,6 +569,7 @@ export function App() {
                     <td>
                       <button
                         className="table-action"
+                        disabled={!moderationEnabled}
                         onClick={() => void updateUserStatus(user.id, user.status)}
                         type="button"
                       >
@@ -613,6 +619,7 @@ export function App() {
                     <td>
                       <button
                         className="table-action"
+                        disabled={!moderationEnabled}
                         onClick={() => void updateCharacterStatus(character.id, character.status)}
                         type="button"
                       >

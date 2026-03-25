@@ -612,7 +612,7 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 
 ## 11. Phase 7: Auditability, Moderation, and Recovery
 
-Status: [ ] Not started
+Status: [ ] In progress
 
 ### Objective
 

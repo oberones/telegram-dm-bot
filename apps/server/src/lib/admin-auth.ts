@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 import {
+  createAuditLog,
   createAdminSession,
   deleteAdminSessionByHash,
   getAdminSessionWithUserByHash,
@@ -143,6 +144,13 @@ export async function requireAdminAuth(app: FastifyInstance, request: FastifyReq
   return context;
 }
 
+export function requireAdminRole(
+  role: AdminUserAccountRecord["role"],
+  allowedRoles: AdminUserAccountRecord["role"][],
+) {
+  return allowedRoles.includes(role);
+}
+
 export async function loginAdmin(
   app: FastifyInstance,
   request: FastifyRequest,
@@ -172,6 +180,18 @@ export async function loginAdmin(
     expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS),
   });
 
+  await createAuditLog({
+    actorType: "admin_user",
+    actorAdminUserId: adminUser.id,
+    action: "admin_logged_in",
+    targetType: "admin_session",
+    reason: null,
+    metadata: {
+      email: adminUser.email,
+      role: adminUser.role,
+    },
+  });
+
   reply.header(
     "Set-Cookie",
     buildCookieValue(
@@ -195,9 +215,24 @@ export async function loginAdmin(
 
 export async function logoutAdmin(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply) {
   const token = parseCookies(request).get(ADMIN_SESSION_COOKIE);
+  const auth = await getAdminAuthContext(app, request);
 
   if (token) {
     await deleteAdminSessionByHash(hashSessionToken(app.config.sessionSecret, token));
+  }
+
+  if (auth) {
+    await createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: "admin_logged_out",
+      targetType: "admin_session",
+      reason: null,
+      metadata: {
+        email: auth.adminUser.email,
+        role: auth.adminUser.role,
+      },
+    });
   }
 
   reply.header("Set-Cookie", buildClearedCookieValue(ADMIN_SESSION_COOKIE, app.config.cookieSecure));
