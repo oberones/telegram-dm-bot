@@ -55,8 +55,8 @@ The recommended development path is:
 2. [x] Phase 1: Technical Foundation
 3. [x] Phase 2: Data Model and Persistence
 4. [x] Phase 3: Telegram Identity and Character Creation
-5. [ ] Phase 4: Combat Engine v1
-6. [ ] Phase 5: Dispute Workflow in Telegram
+5. [x] Phase 4: Combat Engine v1
+6. [x] Phase 5: Dispute Workflow in Telegram
 7. [ ] Phase 6: Admin Panel v1
 8. [ ] Phase 7: Auditability, Moderation, and Recovery
 9. [ ] Phase 8: Alpha Release
@@ -80,12 +80,12 @@ Completed so far:
 - TypeScript workspace scaffold with server, admin, shared, domain, engine, and DB packages
 - initial PostgreSQL migration and typed DB access layer
 - first Telegram vertical slice for `/start`, `/create_character`, `/character`, and `/cancel`
+- deterministic combat engine with persisted event logs and automated tests
+- end-to-end dispute flow with accept/decline, group targeting, match persistence, `/record`, and `/history`
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- combat engine
-- dispute lifecycle
 - real admin data/API flows
 - moderation and recovery workflows
 - release hardening
@@ -394,7 +394,7 @@ Implement:
 
 ## 8. Phase 4: Combat Engine v1
 
-Status: [ ] Not started
+Status: [x] Completed
 
 ### Objective
 
@@ -473,7 +473,7 @@ Ensure:
 
 ## 9. Phase 5: Dispute Workflow in Telegram
 
-Status: [ ] Not started
+Status: [x] Completed
 
 ### Objective
 

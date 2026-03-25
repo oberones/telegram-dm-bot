@@ -7,7 +7,9 @@ import {
   handleCharacter,
   handleCreateCharacter,
   handleDisputeCommand,
+  handleHistory,
   handleHelp,
+  handleRecord,
   handleStart,
   handleAccept,
   handleParsedDisputeCommand,
@@ -94,6 +96,30 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
     }
 
     await app.telegram.sendMessage(chatId, await handleCharacter(actor));
+    return;
+  }
+
+  if (normalizedCommand === "/record") {
+    if (!isPrivateChat) {
+      await app.telegram.sendMessage(chatId, {
+        text: "Arena records are shown in DM right now. Open a private chat with the bot and send /record there.",
+      });
+      return;
+    }
+
+    await app.telegram.sendMessage(chatId, await handleRecord(actor));
+    return;
+  }
+
+  if (normalizedCommand === "/history") {
+    if (!isPrivateChat) {
+      await app.telegram.sendMessage(chatId, {
+        text: "Dispute history is shown in DM right now. Open a private chat with the bot and send /history there.",
+      });
+      return;
+    }
+
+    await app.telegram.sendMessage(chatId, await handleHistory(actor));
     return;
   }
 

@@ -8,6 +8,8 @@ import {
   getActiveSessionByUserId,
   getPendingIncomingDisputes,
   getPendingOutgoingDisputes,
+  listRecentDisputesForUser,
+  listRecentMatchesForUser,
   getUserById,
   getUserByTelegramUserId,
   getUserByUsername,
@@ -16,6 +18,8 @@ import {
   upsertTelegramUser,
   type CharacterRecord,
   type DisputeRecord,
+  type UserDisputeSummaryRecord,
+  type UserMatchSummaryRecord,
 } from "@dm-bot/db";
 import {
   resolveMatch,
@@ -264,6 +268,8 @@ function helpText() {
     "/help",
     "/create_character",
     "/character",
+    "/record",
+    "/history",
     "/dispute @username reason",
     "/accept",
     "/decline",
@@ -273,6 +279,30 @@ function helpText() {
     "- /start, /help, and /dispute work in groups",
     "- character creation and sheet management should be done in DM",
   ].join("\n");
+}
+
+function formatMatchOutcome(match: UserMatchSummaryRecord) {
+  const outcome = match.match_status === "completed"
+    ? match.is_winner
+      ? "Win"
+      : "Loss"
+    : capitalize(match.match_status);
+  const rounds = match.rounds_completed ? `, ${match.rounds_completed} rounds` : "";
+  const endReason = match.end_reason ? `, ${match.end_reason}` : "";
+
+  return `${outcome} vs ${match.opponent_character_name}${rounds}${endReason}`;
+}
+
+function formatDisputePerspective(dispute: UserDisputeSummaryRecord, userId: string) {
+  if (dispute.challenger_user_id === userId) {
+    return `You challenged ${dispute.target_display_name} (${dispute.target_character_name})`;
+  }
+
+  return `${dispute.challenger_display_name} (${dispute.challenger_character_name}) challenged you`;
+}
+
+function formatTimestamp(value: Date) {
+  return value.toISOString().slice(0, 10);
 }
 
 function parseDisputeCommand(text: string) {
@@ -437,6 +467,56 @@ export async function handleCharacter(actor: TelegramActor): Promise<OutboundMes
     replyMarkup: {
       inline_keyboard: [[{ text: "Create Character", callback_data: "nav:create_character" }]],
     },
+  };
+}
+
+export async function handleRecord(actor: TelegramActor): Promise<OutboundMessage> {
+  const user = await ensureUser(actor);
+  const character = await getActiveCharacterByUserId(user.id);
+
+  if (!character) {
+    return {
+      text: "You do not have a character yet. Use /create_character to enter the arena.",
+      replyMarkup: {
+        inline_keyboard: startButtons(false),
+      },
+    };
+  }
+
+  const recentMatches = await listRecentMatchesForUser(user.id, 5);
+  const recentMatchLines = recentMatches.length === 0
+    ? ["No completed arena history yet."]
+    : recentMatches.map((match) => `- ${formatTimestamp(match.created_at)}: ${formatMatchOutcome(match)}`);
+
+  return {
+    text: [
+      `${character.name} the ${capitalize(character.class_key)}`,
+      `Record: ${character.wins}-${character.losses} (${character.matches_played} matches)`,
+      "",
+      "Recent matches:",
+      ...recentMatchLines,
+    ].join("\n"),
+  };
+}
+
+export async function handleHistory(actor: TelegramActor): Promise<OutboundMessage> {
+  const user = await ensureUser(actor);
+  const disputes = await listRecentDisputesForUser(user.id, 8);
+
+  if (disputes.length === 0) {
+    return {
+      text: "You do not have any dispute history yet.",
+    };
+  }
+
+  return {
+    text: [
+      "Recent disputes:",
+      ...disputes.map(
+        (dispute) =>
+          `- ${formatTimestamp(dispute.created_at)}: ${formatDisputePerspective(dispute, user.id)}. Status: ${dispute.status}. Reason: ${dispute.reason}`,
+      ),
+    ].join("\n"),
   };
 }
 
@@ -835,21 +915,37 @@ async function resolveAcceptedDispute(actor: TelegramActor, dispute: DisputeReco
     config: rulesConfigSnapshot(),
   });
 
-  await resolvePendingDispute({
-    disputeId: dispute.id,
-    targetUserId: targetUser.id,
-    rulesVersionId: rulesVersion.id,
-    rulesSnapshot: rulesConfigSnapshot(),
-    challengerCharacter,
-    targetCharacter,
-    winnerCharacterId:
-      result.winnerParticipantSlot === 1 ? challengerCharacter.id : targetCharacter.id,
-    endReason: result.endReason,
-    roundsCompleted: result.roundsCompleted,
-    events: result.events.map((event, index) =>
-      toPersistedEvent(event, challengerCharacter.id, targetCharacter.id, index + 1),
-    ),
-  });
+  try {
+    await resolvePendingDispute({
+      disputeId: dispute.id,
+      targetUserId: targetUser.id,
+      rulesVersionId: rulesVersion.id,
+      rulesSnapshot: rulesConfigSnapshot(),
+      challengerCharacter,
+      targetCharacter,
+      winnerCharacterId:
+        result.winnerParticipantSlot === 1 ? challengerCharacter.id : targetCharacter.id,
+      endReason: result.endReason,
+      roundsCompleted: result.roundsCompleted,
+      events: result.events.map((event, index) =>
+        toPersistedEvent(event, challengerCharacter.id, targetCharacter.id, index + 1),
+      ),
+    });
+  } catch {
+    return {
+      message: {
+        text: "The duel could not be finalized safely. The dispute is still pending and can be retried shortly.",
+      },
+      notifications: [
+        {
+          telegramUserId: challengerUser.telegram_user_id,
+          message: {
+            text: `${targetUser.display_name} tried to accept your dispute, but the duel could not be finalized safely yet. It remains pending for now.`,
+          },
+        },
+      ],
+    };
+  }
 
   const summary = buildMatchSummary(
     challengerCharacter,

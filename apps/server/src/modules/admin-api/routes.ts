@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-import { getDashboardCounts, getMatchById, listMatchEvents, listMatches } from "@dm-bot/db";
+import { getDashboardCounts, getMatchById, listDisputes, listMatchEvents, listMatches } from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
 
 export function registerAdminApiRoutes(app: FastifyInstance) {
@@ -31,6 +31,12 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   app.get("/api/matches", async () => {
     return {
       matches: await listMatches(),
+    };
+  });
+
+  app.get("/api/disputes", async () => {
+    return {
+      disputes: await listDisputes(),
     };
   });
 

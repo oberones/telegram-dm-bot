@@ -71,6 +71,34 @@ export type MatchEventRecord = {
   created_at: Date;
 };
 
+export type UserMatchSummaryRecord = {
+  match_id: string;
+  dispute_id: string;
+  match_status: MatchRecord["status"];
+  end_reason: MatchRecord["end_reason"];
+  rounds_completed: number | null;
+  created_at: Date;
+  completed_at: Date | null;
+  character_id: string;
+  character_name: string;
+  opponent_character_id: string;
+  opponent_character_name: string;
+  is_winner: boolean;
+};
+
+export type UserDisputeSummaryRecord = {
+  id: string;
+  status: DisputeRecord["status"];
+  reason: string;
+  created_at: Date;
+  challenger_user_id: string;
+  target_user_id: string;
+  challenger_display_name: string;
+  target_display_name: string;
+  challenger_character_name: string;
+  target_character_name: string;
+};
+
 export type BotSessionRecord = {
   id: string;
   user_id: string;
@@ -723,6 +751,120 @@ export async function listMatchEvents(matchId: string): Promise<MatchEventRecord
         ORDER BY sequence_number ASC
       `,
       [matchId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listRecentMatchesForUser(
+  userId: string,
+  limit = 5,
+): Promise<UserMatchSummaryRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserMatchSummaryRecord>(
+      `
+        SELECT
+          m.id AS match_id,
+          m.dispute_id,
+          m.status AS match_status,
+          m.end_reason,
+          m.rounds_completed,
+          m.created_at,
+          m.completed_at,
+          self.character_id,
+          self_character.name AS character_name,
+          opponent.character_id AS opponent_character_id,
+          opponent_character.name AS opponent_character_name,
+          self.is_winner
+        FROM match_participants self
+        INNER JOIN matches m
+          ON m.id = self.match_id
+        INNER JOIN match_participants opponent
+          ON opponent.match_id = self.match_id
+         AND opponent.id <> self.id
+        INNER JOIN characters self_character
+          ON self_character.id = self.character_id
+        INNER JOIN characters opponent_character
+          ON opponent_character.id = opponent.character_id
+        WHERE self.user_id = $1
+        ORDER BY m.created_at DESC
+        LIMIT $2
+      `,
+      [userId, limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listRecentDisputesForUser(
+  userId: string,
+  limit = 10,
+): Promise<UserDisputeSummaryRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserDisputeSummaryRecord>(
+      `
+        SELECT
+          d.id,
+          d.status,
+          d.reason,
+          d.created_at,
+          d.challenger_user_id,
+          d.target_user_id,
+          challenger.display_name AS challenger_display_name,
+          target.display_name AS target_display_name,
+          challenger_character.name AS challenger_character_name,
+          target_character.name AS target_character_name
+        FROM disputes d
+        INNER JOIN users challenger
+          ON challenger.id = d.challenger_user_id
+        INNER JOIN users target
+          ON target.id = d.target_user_id
+        INNER JOIN characters challenger_character
+          ON challenger_character.id = d.challenger_character_id
+        INNER JOIN characters target_character
+          ON target_character.id = d.target_character_id
+        WHERE d.challenger_user_id = $1
+           OR d.target_user_id = $1
+        ORDER BY d.created_at DESC
+        LIMIT $2
+      `,
+      [userId, limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listDisputes(limit = 50): Promise<UserDisputeSummaryRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserDisputeSummaryRecord>(
+      `
+        SELECT
+          d.id,
+          d.status,
+          d.reason,
+          d.created_at,
+          d.challenger_user_id,
+          d.target_user_id,
+          challenger.display_name AS challenger_display_name,
+          target.display_name AS target_display_name,
+          challenger_character.name AS challenger_character_name,
+          target_character.name AS target_character_name
+        FROM disputes d
+        INNER JOIN users challenger
+          ON challenger.id = d.challenger_user_id
+        INNER JOIN users target
+          ON target.id = d.target_user_id
+        INNER JOIN characters challenger_character
+          ON challenger_character.id = d.challenger_character_id
+        INNER JOIN characters target_character
+          ON target_character.id = d.target_character_id
+        ORDER BY d.created_at DESC
+        LIMIT $1
+      `,
+      [limit],
     );
 
     return result.rows;
