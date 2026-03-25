@@ -1,3 +1,9 @@
+## 0.9.0 (2026-03-25)
+
+### Feat
+
+- add integration testing
+
 ## 0.8.0 (2026-03-25)
 
 ### Feat
