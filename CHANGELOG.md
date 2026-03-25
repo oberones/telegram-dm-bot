@@ -1,3 +1,11 @@
+## 0.5.0 (2026-03-25)
+
+### Feat
+
+- extend admin functionality
+- add authentication to admin ui
+- admin panel integration
+
 ## 0.4.0 (2026-03-25)
 
 ### Feat
