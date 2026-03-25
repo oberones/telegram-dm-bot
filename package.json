@@ -1,0 +1,21 @@
+{
+  "name": "dungeon-master-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run typecheck --workspaces --if-present",
+    "dev": "npm run dev --workspace @dm-bot/server",
+    "dev:admin": "npm run dev --workspace @dm-bot/admin",
+    "dev:server": "npm run dev --workspace @dm-bot/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
