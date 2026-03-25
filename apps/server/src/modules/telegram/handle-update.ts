@@ -22,6 +22,44 @@ import {
 
 import type { TelegramMessage, TelegramUpdate } from "../../lib/telegram-types.js";
 
+type TelegramUpdateDeps = {
+  handleCallback: typeof handleCallback;
+  handleDecline: typeof handleDecline;
+  handleCancel: typeof handleCancel;
+  handleCharacter: typeof handleCharacter;
+  handleCreateCharacter: typeof handleCreateCharacter;
+  handleDeleteCharacterConfirm: typeof handleDeleteCharacterConfirm;
+  handleDeleteCharacterPrompt: typeof handleDeleteCharacterPrompt;
+  handleDisputeCommand: typeof handleDisputeCommand;
+  handleHistory: typeof handleHistory;
+  handleHelp: typeof handleHelp;
+  handleRecord: typeof handleRecord;
+  handleStart: typeof handleStart;
+  handleAccept: typeof handleAccept;
+  handleParsedDisputeCommand: typeof handleParsedDisputeCommand;
+  handleReplyDisputeCommand: typeof handleReplyDisputeCommand;
+  handleTextMessage: typeof handleTextMessage;
+};
+
+const defaultDeps: TelegramUpdateDeps = {
+  handleCallback,
+  handleDecline,
+  handleCancel,
+  handleCharacter,
+  handleCreateCharacter,
+  handleDeleteCharacterConfirm,
+  handleDeleteCharacterPrompt,
+  handleDisputeCommand,
+  handleHistory,
+  handleHelp,
+  handleRecord,
+  handleStart,
+  handleAccept,
+  handleParsedDisputeCommand,
+  handleReplyDisputeCommand,
+  handleTextMessage,
+};
+
 function actorFromUser(user: {
   id: number;
   username?: string;
@@ -36,9 +74,13 @@ function actorFromUser(user: {
   };
 }
 
-export async function processTelegramUpdate(app: FastifyInstance, update: TelegramUpdate) {
+export async function processTelegramUpdate(
+  app: FastifyInstance,
+  update: TelegramUpdate,
+  deps: TelegramUpdateDeps = defaultDeps,
+) {
   if (update.callback_query?.from && update.callback_query.message?.chat.id) {
-    const result = await handleCallback(
+    const result = await deps.handleCallback(
       actorFromUser(update.callback_query.from),
       update.callback_query.data ?? "",
     );
@@ -68,12 +110,12 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
   const isPrivateChat = chatType === "private";
 
   if (normalizedCommand === "/start") {
-    await app.telegram.sendMessage(chatId, await handleStart(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleStart(actor));
     return;
   }
 
   if (normalizedCommand === "/help") {
-    await app.telegram.sendMessage(chatId, await handleHelp());
+    await app.telegram.sendMessage(chatId, await deps.handleHelp());
     return;
   }
 
@@ -85,7 +127,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleCreateCharacter(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleCreateCharacter(actor));
     return;
   }
 
@@ -97,7 +139,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleCharacter(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleCharacter(actor));
     return;
   }
 
@@ -109,7 +151,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleDeleteCharacterPrompt(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleDeleteCharacterPrompt(actor));
     return;
   }
 
@@ -121,7 +163,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleRecord(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleRecord(actor));
     return;
   }
 
@@ -133,7 +175,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleHistory(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleHistory(actor));
     return;
   }
 
@@ -145,26 +187,26 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
       return;
     }
 
-    await app.telegram.sendMessage(chatId, await handleCancel(actor));
+    await app.telegram.sendMessage(chatId, await deps.handleCancel(actor));
     return;
   }
 
   if (normalizedCommand === "/dispute") {
-    const result = await resolveDisputeCommand(actor, update.message, text);
+    const result = await resolveDisputeCommand(actor, update.message, text, deps);
     await app.telegram.sendMessage(chatId, result.message);
     await sendNotifications(app, result.notifications ?? []);
     return;
   }
 
   if (normalizedCommand === "/accept") {
-    const result = await handleAccept(actor);
+    const result = await deps.handleAccept(actor);
     await app.telegram.sendMessage(chatId, result.message);
     await sendNotifications(app, result.notifications ?? []);
     return;
   }
 
   if (normalizedCommand === "/decline") {
-    const result = await handleDecline(actor);
+    const result = await deps.handleDecline(actor);
     await app.telegram.sendMessage(chatId, result.message);
     await sendNotifications(app, result.notifications ?? []);
     return;
@@ -174,7 +216,7 @@ export async function processTelegramUpdate(app: FastifyInstance, update: Telegr
     return;
   }
 
-  const sessionMessage = await handleTextMessage(actor, text);
+  const sessionMessage = await deps.handleTextMessage(actor, text);
 
   if (sessionMessage) {
     await app.telegram.sendMessage(chatId, sessionMessage);
@@ -200,11 +242,12 @@ async function resolveDisputeCommand(
   actor: ReturnType<typeof actorFromUser>,
   message: TelegramMessage,
   text: string,
+  deps: TelegramUpdateDeps,
 ) {
   const repliedUserId = message.reply_to_message?.from?.id;
 
   if (repliedUserId && !message.reply_to_message?.from?.is_bot) {
-    return handleReplyDisputeCommand({
+    return deps.handleReplyDisputeCommand({
       actor,
       text,
       repliedUserTelegramId: String(repliedUserId),
@@ -216,14 +259,14 @@ async function resolveDisputeCommand(
   if (entityTarget) {
     const reason = removeTargetFromDisputeText(text, entityTarget.rawText);
 
-    return handleDisputeCommand({
+    return deps.handleDisputeCommand({
       actor,
       reason,
       target: entityTarget.target,
     });
   }
 
-  return handleParsedDisputeCommand(actor, text);
+  return deps.handleParsedDisputeCommand(actor, text);
 }
 
 function extractMentionTarget(message: TelegramMessage):

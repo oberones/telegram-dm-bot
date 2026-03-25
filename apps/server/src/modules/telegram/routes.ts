@@ -7,7 +7,15 @@ type TelegramHeaders = {
   "x-telegram-bot-api-secret-token"?: string;
 };
 
-export function registerTelegramRoutes(app: FastifyInstance) {
+type TelegramRouteDeps = {
+  processTelegramUpdate: typeof processTelegramUpdate;
+};
+
+const defaultDeps: TelegramRouteDeps = {
+  processTelegramUpdate,
+};
+
+export function registerTelegramRoutes(app: FastifyInstance, deps: TelegramRouteDeps = defaultDeps) {
   app.post(
     "/telegram/webhook",
     async (
@@ -26,7 +34,7 @@ export function registerTelegramRoutes(app: FastifyInstance) {
       request.log.info({ body: request.body }, "Received Telegram webhook payload");
 
       const update = request.body;
-      await processTelegramUpdate(app, update);
+      await deps.processTelegramUpdate(app, update);
 
       return { ok: true };
     },

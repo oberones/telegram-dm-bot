@@ -89,6 +89,8 @@ Completed so far:
 - documented backup and restore runbook in [BACKUP_RESTORE_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BACKUP_RESTORE_RUNBOOK.md)
 - restore rehearsal confirmed against a non-production database
 - initial alpha planning document in [ALPHA_TEST_PLAN.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_TEST_PLAN.md)
+- operator guidance in [OPERATOR_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/OPERATOR_RUNBOOK.md)
+- alpha triage template in [ALPHA_BUG_BACKLOG.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_BUG_BACKLOG.md)
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:

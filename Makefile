@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test-engine migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
+.PHONY: install typecheck build test test-engine test-server migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
 
 install:
 	npm install
@@ -7,6 +7,12 @@ typecheck:
 	npm run typecheck
 
 build:
+	npm run build
+
+test:
+	npm run test:engine
+	npm run test:server
+	npm run typecheck
 	npm run build
 
 test-engine:
