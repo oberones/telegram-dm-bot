@@ -103,6 +103,65 @@ test("GET /api/session returns 401 when not authenticated", async () => {
   });
 });
 
+test("POST /api/login returns 400 when email or password is missing", async () => {
+  const { app } = buildTestApp();
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: {
+      email: "admin@example.com",
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.json(), {
+    error: "Email and password are required",
+  });
+});
+
+test("POST /api/login delegates to loginAdmin for valid credentials", async () => {
+  let receivedEmail = "";
+  let receivedPassword = "";
+  const { app } = buildTestApp({
+    loginAdmin: async (_app, _request, _reply, email, password) => {
+      receivedEmail = email;
+      receivedPassword = password;
+      return {
+        authenticated: true,
+        adminUser: {
+          id: "admin-1",
+          email,
+          displayName: "Admin",
+          role: "super_admin",
+        },
+      };
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: {
+      email: "admin@example.com",
+      password: "correct horse battery staple",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(receivedEmail, "admin@example.com");
+  assert.equal(receivedPassword, "correct horse battery staple");
+  assert.deepEqual(response.json(), {
+    authenticated: true,
+    adminUser: {
+      id: "admin-1",
+      email: "admin@example.com",
+      displayName: "Admin",
+      role: "super_admin",
+    },
+  });
+});
+
 test("POST /api/disputes/:id/cancel rejects moderator role", async () => {
   const { app } = buildTestApp({
     requireAdminAuth: async () => ({

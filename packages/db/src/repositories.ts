@@ -1207,7 +1207,7 @@ export async function createAuditLog(params: {
           reason,
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
       `,
       [
         params.actorType,

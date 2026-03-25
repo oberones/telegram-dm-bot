@@ -59,7 +59,7 @@ The recommended development path is:
 6. [x] Phase 5: Dispute Workflow in Telegram
 7. [x] Phase 6: Admin Panel v1
 8. [x] Phase 7: Auditability, Moderation, and Recovery
-9. [ ] Phase 8: Alpha Release
+9. [x] Phase 8: Alpha Release
 10. [ ] Phase 9: Beta Hardening
 11. [ ] Phase 10: GA Readiness and Launch
 
@@ -91,11 +91,13 @@ Completed so far:
 - initial alpha planning document in [ALPHA_TEST_PLAN.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_TEST_PLAN.md)
 - operator guidance in [OPERATOR_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/OPERATOR_RUNBOOK.md)
 - alpha triage template in [ALPHA_BUG_BACKLOG.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_BUG_BACKLOG.md)
+- Alpha release checklist marked `GO` in [ALPHA_RELEASE_CHECKLIST.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/ALPHA_RELEASE_CHECKLIST.md)
+- Beta hardening plan in [BETA_HARDENING_PLAN.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BETA_HARDENING_PLAN.md)
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- alpha deployment and operator rehearsal
+- Beta hardening execution
 - broader API/bot integration test coverage
 - release hardening
 
@@ -690,7 +692,7 @@ Implement:
 
 ## 12. Phase 8: Alpha Release
 
-Status: [ ] In progress
+Status: [x] Completed
 
 ### Objective
 
@@ -765,7 +767,7 @@ Validate:
 
 ## 13. Phase 9: Beta Hardening
 
-Status: [ ] Not started
+Status: [ ] In progress
 
 ### Objective
 

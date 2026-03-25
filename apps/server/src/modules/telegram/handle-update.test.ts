@@ -195,3 +195,144 @@ test("processTelegramUpdate handles delete confirmation callback", async () => {
   assert.deepEqual(answeredCallbacks, [{ id: "callback-1", text: "Character deleted" }]);
   assert.deepEqual(sentMessages, [{ chatId: 100, text: "character deleted" }]);
 });
+
+test("processTelegramUpdate handles /accept and sends notifications", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 6,
+      message: {
+        message_id: 1,
+        text: "/accept",
+        chat: { id: 100, type: "private" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    {
+      ...buildDeps(),
+      handleAccept: async () => ({
+        message: { text: "accepted" },
+        notifications: [{ telegramUserId: "300", message: { text: "challenge accepted" } }],
+      }),
+    },
+  );
+
+  assert.deepEqual(sentMessages, [
+    { chatId: 100, text: "accepted" },
+    { chatId: "300", text: "challenge accepted" },
+  ]);
+});
+
+test("processTelegramUpdate handles /decline and sends notifications", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 7,
+      message: {
+        message_id: 1,
+        text: "/decline",
+        chat: { id: 100, type: "private" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    {
+      ...buildDeps(),
+      handleDecline: async () => ({
+        message: { text: "declined" },
+        notifications: [{ telegramUserId: "300", message: { text: "challenge declined" } }],
+      }),
+    },
+  );
+
+  assert.deepEqual(sentMessages, [
+    { chatId: 100, text: "declined" },
+    { chatId: "300", text: "challenge declined" },
+  ]);
+});
+
+test("processTelegramUpdate routes mention-based disputes through entity parsing", async () => {
+  const { app, sentMessages } = buildTestApp();
+  let receivedTarget: unknown;
+  let receivedReason = "";
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 8,
+      message: {
+        message_id: 1,
+        text: "/dispute @StevenStrength boofery",
+        entities: [
+          {
+            type: "mention",
+            offset: 9,
+            length: 15,
+          },
+        ],
+        chat: { id: -100, type: "group" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    {
+      ...buildDeps(),
+      handleDisputeCommand: async ({ target, reason }) => {
+        receivedTarget = target;
+        receivedReason = reason;
+        return { message: { text: "mention dispute" } };
+      },
+    },
+  );
+
+  assert.deepEqual(receivedTarget, {
+    type: "username",
+    username: "@StevenStrength",
+  });
+  assert.equal(receivedReason, "boofery");
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "mention dispute" }]);
+});
+
+test("processTelegramUpdate routes text_mention disputes to telegram user ids", async () => {
+  const { app, sentMessages } = buildTestApp();
+  let receivedTarget: unknown;
+  let receivedReason = "";
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 9,
+      message: {
+        message_id: 1,
+        text: "/dispute Steven boofery",
+        entities: [
+          {
+            type: "text_mention",
+            offset: 9,
+            length: 6,
+            user: { id: 555, is_bot: false, first_name: "Steven" },
+          },
+        ],
+        chat: { id: -100, type: "group" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    {
+      ...buildDeps(),
+      handleDisputeCommand: async ({ target, reason }) => {
+        receivedTarget = target;
+        receivedReason = reason;
+        return { message: { text: "text mention dispute" } };
+      },
+    },
+  );
+
+  assert.deepEqual(receivedTarget, {
+    type: "telegram_user_id",
+    telegramUserId: "555",
+  });
+  assert.equal(receivedReason, "boofery");
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "text mention dispute" }]);
+});
