@@ -1,3 +1,9 @@
+## 0.12.1 (2026-03-25)
+
+### Fix
+
+- adjust rogue rapier damage to match spec
+
 ## 0.12.0 (2026-03-25)
 
 ### Feat
