@@ -103,6 +103,52 @@ test("GET /api/session returns 401 when not authenticated", async () => {
   });
 });
 
+test("POST /api/logout clears the admin session cookie", async () => {
+  const app = Fastify();
+  const config: AppConfig = {
+    nodeEnv: "test",
+    appEnv: "local",
+    port: 3000,
+    appBaseUrl: "http://localhost:3000",
+    adminBaseUrl: "http://localhost:8080",
+    databaseUrl: "postgres://test:test@localhost:5432/test",
+    telegramBotToken: "test-token",
+    telegramWebhookSecret: "secret",
+    telegramWebhookUrl: "http://localhost/telegram/webhook",
+    sessionSecret: "session-secret",
+    cookieSecure: false,
+    logLevel: "error",
+    defaultRulesVersion: "arena-v1-alpha",
+    disableNewDisputes: false,
+    telegramDeliveryMode: "polling",
+    telegramPollingTimeoutSeconds: 30,
+  };
+
+  app.decorate("config", config);
+  app.decorate("telegram", {
+    sendMessage: async () => ({ ok: true }),
+  } as any);
+  app.decorate("services", {
+    pingDatabase: async () => true,
+  } as any);
+
+  registerAdminApiRoutes(app);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/logout",
+  });
+  const setCookie = Array.isArray(response.headers["set-cookie"])
+    ? response.headers["set-cookie"].join("; ")
+    : (response.headers["set-cookie"] ?? "");
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { authenticated: false });
+  assert.match(setCookie, /dm_admin_session=/);
+  assert.match(setCookie, /SameSite=Strict/);
+  assert.match(setCookie, /Max-Age=0/);
+});
+
 test("POST /api/login returns 400 when email or password is missing", async () => {
   const { app } = buildTestApp();
 

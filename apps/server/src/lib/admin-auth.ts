@@ -14,6 +14,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 const ADMIN_SESSION_COOKIE = "dm_admin_session";
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const ADMIN_SESSION_TOUCH_INTERVAL_MS = 1000 * 60 * 5;
 
 function hashPassword(password: string, salt: string) {
   return scryptSync(password, salt, 64).toString("hex");
@@ -54,7 +55,7 @@ function buildCookieValue(name: string, value: string, maxAgeSeconds: number, se
     `${name}=${encodeURIComponent(value)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    "SameSite=Strict",
     `Max-Age=${maxAgeSeconds}`,
     ...(secure ? ["Secure"] : []),
   ].join("; ");
@@ -65,7 +66,7 @@ function buildClearedCookieValue(name: string, secure: boolean) {
     `${name}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    "SameSite=Strict",
     "Max-Age=0",
     ...(secure ? ["Secure"] : []),
   ].join("; ");
@@ -121,11 +122,19 @@ export async function getAdminAuthContext(app: FastifyInstance, request: Fastify
   const sessionTokenHash = hashSessionToken(app.config.sessionSecret, token);
   const context = await getAdminSessionWithUserByHash(sessionTokenHash);
 
-  if (!context || context.adminUser.status !== "active") {
+  if (!context) {
+    await deleteAdminSessionByHash(sessionTokenHash);
     return null;
   }
 
-  await touchAdminSession(context.session.id);
+  if (context.adminUser.status !== "active") {
+    await deleteAdminSessionByHash(sessionTokenHash);
+    return null;
+  }
+
+  if (Date.now() - context.session.last_seen_at.getTime() >= ADMIN_SESSION_TOUCH_INTERVAL_MS) {
+    await touchAdminSession(context.session.id);
+  }
 
   return {
     adminUser: context.adminUser,
