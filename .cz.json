@@ -4,6 +4,17 @@
     "tag_format": "$version",
     "version_scheme": "semver",
     "version": "0.11.0",
-    "update_changelog_on_bump": true
+    "update_changelog_on_bump": true,
+    "version_files": [
+      "package.json:version",
+      "package-lock.json:version",
+      "package-lock.json:packages.:version",
+      "apps/admin/package.json:version",
+      "apps/server/package.json:version",
+      "packages/db/package.json:version",
+      "packages/domain/package.json:version",
+      "packages/engine/package.json:version",
+      "packages/shared/package.json:version"
+    ]
   }
 }

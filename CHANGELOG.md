@@ -1,3 +1,10 @@
+## Unreleased
+
+### Chore
+
+- align monorepo package metadata with release version 0.11.0
+- add beta release checklist
+
 ## 0.11.0 (2026-03-25)
 
 ### Feat
