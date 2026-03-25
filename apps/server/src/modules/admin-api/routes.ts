@@ -1,14 +1,18 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  createAuditLog,
   getDashboardCounts,
   getMatchById,
   listCharacters,
   listDisputes,
+  listAuditLogs,
   listMatchEvents,
   listMatchParticipants,
   listMatches,
   listUsers,
+  setCharacterStatus,
+  setUserStatus,
 } from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
 
@@ -131,6 +135,122 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
 
     return {
       characters: await listCharacters(),
+    };
+  });
+
+  app.get("/api/audit-logs", async (request, reply) => {
+    const auth = await requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    return {
+      auditLogs: await listAuditLogs(),
+    };
+  });
+
+  app.post("/api/users/:id/status", async (request, reply) => {
+    const auth = await requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { status?: "active" | "suspended"; reason?: string };
+
+    if (body.status !== "active" && body.status !== "suspended") {
+      reply.code(400);
+      return { error: "Unsupported user status" };
+    }
+
+    if (body.status === "suspended" && !body.reason?.trim()) {
+      reply.code(400);
+      return { error: "A suspension reason is required" };
+    }
+
+    const user = await setUserStatus({
+      userId: id,
+      status: body.status,
+      suspendedReason: body.reason?.trim() ?? null,
+    });
+
+    if (!user) {
+      reply.code(404);
+      return { error: "User not found" };
+    }
+
+    await createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: body.status === "suspended" ? "user_suspended" : "user_activated",
+      targetType: "user",
+      targetId: id,
+      reason: body.reason?.trim() ?? null,
+      metadata: {
+        nextStatus: body.status,
+        targetDisplayName: user.display_name,
+      },
+    });
+
+    return {
+      user,
+    };
+  });
+
+  app.post("/api/characters/:id/status", async (request, reply) => {
+    const auth = await requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { status?: "active" | "frozen"; reason?: string };
+
+    if (body.status !== "active" && body.status !== "frozen") {
+      reply.code(400);
+      return { error: "Unsupported character status" };
+    }
+
+    if (body.status === "frozen" && !body.reason?.trim()) {
+      reply.code(400);
+      return { error: "A freeze reason is required" };
+    }
+
+    const character = await setCharacterStatus({
+      characterId: id,
+      status: body.status,
+      frozenReason: body.reason?.trim() ?? null,
+    });
+
+    if (!character) {
+      reply.code(404);
+      return { error: "Character not found" };
+    }
+
+    await createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: body.status === "frozen" ? "character_frozen" : "character_activated",
+      targetType: "character",
+      targetId: id,
+      reason: body.reason?.trim() ?? null,
+      metadata: {
+        nextStatus: body.status,
+        characterName: character.name,
+      },
+    });
+
+    return {
+      character,
     };
   });
 

@@ -57,7 +57,7 @@ The recommended development path is:
 4. [x] Phase 3: Telegram Identity and Character Creation
 5. [x] Phase 4: Combat Engine v1
 6. [x] Phase 5: Dispute Workflow in Telegram
-7. [ ] Phase 6: Admin Panel v1
+7. [x] Phase 6: Admin Panel v1
 8. [ ] Phase 7: Auditability, Moderation, and Recovery
 9. [ ] Phase 8: Alpha Release
 10. [ ] Phase 9: Beta Hardening
@@ -544,7 +544,7 @@ Implement:
 
 ## 10. Phase 6: Admin Panel v1
 
-Status: [ ] In progress
+Status: [x] Completed
 
 ### Objective
 
@@ -590,7 +590,7 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 - [x] admin login
 - [x] dashboard
 - [x] detail pages for core entities
-- [ ] initial management tooling
+- [x] initial management tooling
 
 ### Dependencies
 

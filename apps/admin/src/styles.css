@@ -168,6 +168,15 @@ input {
   cursor: pointer;
 }
 
+.table-action {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .primary-button {
   background: var(--accent);
   color: #fff7ef;

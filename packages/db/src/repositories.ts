@@ -88,6 +88,7 @@ export type AdminCharacterRecord = {
   matches_played: number;
   created_at: Date;
   last_match_at: Date | null;
+  frozen_reason: string | null;
 };
 
 export type AdminMatchListRecord = {
@@ -115,6 +116,19 @@ export type MatchParticipantRecord = {
   user_display_name: string;
   snapshot: Record<string, unknown>;
   created_at: Date;
+};
+
+export type AuditLogRecord = {
+  id: string;
+  actor_type: string;
+  actor_admin_user_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  reason: string | null;
+  metadata: Record<string, unknown>;
+  created_at: Date;
+  admin_display_name: string | null;
 };
 
 export type MatchEventRecord = {
@@ -1017,11 +1031,134 @@ export async function listCharacters(limit = 100): Promise<AdminCharacterRecord[
           c.losses,
           c.matches_played,
           c.created_at,
-          c.last_match_at
+          c.last_match_at,
+          c.frozen_reason
         FROM characters c
         INNER JOIN users u
           ON u.id = c.user_id
         ORDER BY c.created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function setUserStatus(params: {
+  userId: string;
+  status: UserRecord["status"];
+  suspendedReason?: string | null;
+}): Promise<UserRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<UserRecord>(
+      `
+        UPDATE users
+        SET status = $2,
+            suspended_reason = $3,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, telegram_user_id, telegram_username, telegram_first_name, telegram_last_name, display_name, status
+      `,
+      [params.userId, params.status, params.status === "suspended" ? params.suspendedReason ?? null : null],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function setCharacterStatus(params: {
+  characterId: string;
+  status: CharacterRecord["status"];
+  frozenReason?: string | null;
+}): Promise<CharacterRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<CharacterRecord>(
+      `
+        UPDATE characters
+        SET status = $2,
+            frozen_reason = $3,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          name,
+          class_key,
+          level,
+          status,
+          rules_version_id,
+          wins,
+          losses,
+          matches_played,
+          derived_stats,
+          ability_scores,
+          loadout,
+          resource_state
+      `,
+      [params.characterId, params.status, params.status === "frozen" ? params.frozenReason ?? null : null],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function createAuditLog(params: {
+  actorType: string;
+  actorAdminUserId?: string | null;
+  action: string;
+  targetType: string;
+  targetId?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `
+        INSERT INTO audit_logs (
+          actor_type,
+          actor_admin_user_id,
+          action,
+          target_type,
+          target_id,
+          reason,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `,
+      [
+        params.actorType,
+        params.actorAdminUserId ?? null,
+        params.action,
+        params.targetType,
+        params.targetId ?? null,
+        params.reason ?? null,
+        JSON.stringify(params.metadata ?? {}),
+      ],
+    );
+  });
+}
+
+export async function listAuditLogs(limit = 50): Promise<AuditLogRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AuditLogRecord>(
+      `
+        SELECT
+          a.id,
+          a.actor_type,
+          a.actor_admin_user_id,
+          a.action,
+          a.target_type,
+          a.target_id,
+          a.reason,
+          a.metadata,
+          a.created_at,
+          au.display_name AS admin_display_name
+        FROM audit_logs a
+        LEFT JOIN admin_users au
+          ON au.id = a.actor_admin_user_id
+        ORDER BY a.created_at DESC
         LIMIT $1
       `,
       [limit],

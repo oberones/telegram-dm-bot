@@ -94,15 +94,27 @@ type MatchDetailResponse = {
   events: MatchEvent[];
 };
 
+type AuditLog = {
+  id: string;
+  actor_type: string;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  reason: string | null;
+  created_at: string;
+  admin_display_name: string | null;
+};
+
 type AdminData = {
   dashboard: DashboardResponse | null;
   disputes: DisputeSummary[];
   users: UserSummary[];
   characters: CharacterSummary[];
   matches: MatchSummary[];
+  auditLogs: AuditLog[];
 };
 
-type ViewKey = "dashboard" | "disputes" | "matches" | "users" | "characters";
+type ViewKey = "dashboard" | "disputes" | "matches" | "users" | "characters" | "audit";
 
 const navItems: Array<{ key: ViewKey; label: string }> = [
   { key: "dashboard", label: "Dashboard" },
@@ -110,6 +122,7 @@ const navItems: Array<{ key: ViewKey; label: string }> = [
   { key: "matches", label: "Matches" },
   { key: "users", label: "Users" },
   { key: "characters", label: "Characters" },
+  { key: "audit", label: "Audit Log" },
 ];
 
 function apiBase() {
@@ -163,6 +176,7 @@ function emptyAdminData(): AdminData {
     users: [],
     characters: [],
     matches: [],
+    auditLogs: [],
   };
 }
 
@@ -178,6 +192,36 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+
+  async function refreshAdminData() {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const [dashboard, disputes, matches, users, characters, auditLogs] = await Promise.all([
+        fetchJson<DashboardResponse>("/api/dashboard"),
+        fetchJson<{ disputes: DisputeSummary[] }>("/api/disputes"),
+        fetchJson<{ matches: MatchSummary[] }>("/api/matches"),
+        fetchJson<{ users: UserSummary[] }>("/api/users"),
+        fetchJson<{ characters: CharacterSummary[] }>("/api/characters"),
+        fetchJson<{ auditLogs: AuditLog[] }>("/api/audit-logs"),
+      ]);
+
+      setData({
+        dashboard,
+        disputes: disputes.disputes,
+        matches: matches.matches,
+        users: users.users,
+        characters: characters.characters,
+        auditLogs: auditLogs.auditLogs,
+      });
+      setSelectedMatchId((current) => current ?? matches.matches[0]?.id ?? null);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown admin loading error");
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   useEffect(() => {
     fetchJson<SessionResponse>("/api/session")
@@ -200,32 +244,7 @@ export function App() {
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
-
-    Promise.all([
-      fetchJson<DashboardResponse>("/api/dashboard"),
-      fetchJson<{ disputes: DisputeSummary[] }>("/api/disputes"),
-      fetchJson<{ matches: MatchSummary[] }>("/api/matches"),
-      fetchJson<{ users: UserSummary[] }>("/api/users"),
-      fetchJson<{ characters: CharacterSummary[] }>("/api/characters"),
-    ])
-      .then(([dashboard, disputes, matches, users, characters]) => {
-        setData({
-          dashboard,
-          disputes: disputes.disputes,
-          matches: matches.matches,
-          users: users.users,
-          characters: characters.characters,
-        });
-        setSelectedMatchId(matches.matches[0]?.id ?? null);
-      })
-      .catch((caughtError: unknown) => {
-        setError(caughtError instanceof Error ? caughtError.message : "Unknown admin loading error");
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
+    void refreshAdminData();
   }, [session]);
 
   useEffect(() => {
@@ -277,6 +296,56 @@ export function App() {
     setData(emptyAdminData());
     setSelectedMatchId(null);
     setMatchDetail(null);
+  }
+
+  async function updateUserStatus(userId: string, currentStatus: string) {
+    const nextStatus = currentStatus === "active" ? "suspended" : "active";
+    const reason = nextStatus === "suspended"
+      ? window.prompt("Why are you suspending this user?")?.trim()
+      : window.prompt("Optional reactivation note")?.trim();
+
+    if (nextStatus === "suspended" && !reason) {
+      setError("A suspension reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/users/${userId}/status`, {
+        method: "POST",
+        body: JSON.stringify({
+          status: nextStatus,
+          reason,
+        }),
+      });
+      await refreshAdminData();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "User status update failed");
+    }
+  }
+
+  async function updateCharacterStatus(characterId: string, currentStatus: string) {
+    const nextStatus = currentStatus === "active" ? "frozen" : "active";
+    const reason = nextStatus === "frozen"
+      ? window.prompt("Why are you freezing this character?")?.trim()
+      : window.prompt("Optional unfreeze note")?.trim();
+
+    if (nextStatus === "frozen" && !reason) {
+      setError("A freeze reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/characters/${characterId}/status`, {
+        method: "POST",
+        body: JSON.stringify({
+          status: nextStatus,
+          reason,
+        }),
+      });
+      await refreshAdminData();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Character status update failed");
+    }
   }
 
   if (isSessionLoading) {
@@ -480,6 +549,7 @@ export function App() {
                   <th>Character</th>
                   <th>Record</th>
                   <th>Last seen</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -491,6 +561,15 @@ export function App() {
                     <td>{user.character_name ? `${user.character_name} (${user.class_key})` : "none"}</td>
                     <td>{user.matches_played ? `${user.wins}-${user.losses}` : "0-0"}</td>
                     <td>{formatDate(user.last_seen_at)}</td>
+                    <td>
+                      <button
+                        className="table-action"
+                        onClick={() => void updateUserStatus(user.id, user.status)}
+                        type="button"
+                      >
+                        {user.status === "active" ? "Suspend" : "Activate"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -515,6 +594,7 @@ export function App() {
                   <th>Status</th>
                   <th>Record</th>
                   <th>Last match</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -530,6 +610,51 @@ export function App() {
                       {character.wins}-{character.losses} ({character.matches_played})
                     </td>
                     <td>{formatDate(character.last_match_at)}</td>
+                    <td>
+                      <button
+                        className="table-action"
+                        onClick={() => void updateCharacterStatus(character.id, character.status)}
+                        type="button"
+                      >
+                        {character.status === "active" ? "Freeze" : "Unfreeze"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {!isLoading && view === "audit" ? (
+        <section className="panel">
+          <header className="panel-header">
+            <h2>Audit log</h2>
+            <span>{data.auditLogs.length}</span>
+          </header>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.auditLogs.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDate(entry.created_at)}</td>
+                    <td>{entry.admin_display_name ?? entry.actor_type}</td>
+                    <td>{capitalize(entry.action)}</td>
+                    <td>
+                      {entry.target_type}
+                      {entry.target_id ? ` (${entry.target_id.slice(0, 8)})` : ""}
+                    </td>
+                    <td>{entry.reason ?? "none"}</td>
                   </tr>
                 ))}
               </tbody>
