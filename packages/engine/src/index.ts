@@ -122,6 +122,14 @@ export type CombatEvent =
       summary: string;
     }
   | {
+      type: "effect";
+      round: number;
+      participantSlot: 1 | 2;
+      targetSlot: 1 | 2;
+      actionKey: string;
+      summary: string;
+    }
+  | {
       type: "match_end";
       winnerParticipantSlot: 1 | 2;
       endReason: MatchEndReason;
@@ -164,6 +172,12 @@ const defaultRandomSource: RandomSource = {
 
 type MutableState = MatchParticipantState & {
   participant: CombatParticipant;
+  guidingBoltMark:
+    | {
+        sourceSlot: 1 | 2;
+        grantedRound: number;
+      }
+    | undefined;
 };
 
 type AttackProfile = {
@@ -228,6 +242,10 @@ export function resolveMatch(input: ResolveMatchInput): MatchResolutionResult {
         const result = buildKnockoutResult(actor.slot, roundsCompleted, states, events);
         return result;
       }
+
+      if (target.guidingBoltMark?.sourceSlot === actor.slot && target.guidingBoltMark.grantedRound < round) {
+        target.guidingBoltMark = undefined;
+      }
     }
   }
 
@@ -266,6 +284,7 @@ function createState(participant: CombatParticipant): MutableState {
     successfulHits: 0,
     resources: structuredClone(participant.resourceState),
     participant,
+    guidingBoltMark: undefined,
   };
 }
 
@@ -339,7 +358,7 @@ function chooseAction(actor: MutableState, target: MutableState): AttackProfile 
         actionKey: "Rapier Attack",
         attackModifier: abilityModifier(ability.dex) + proficiency,
         damageDice: { count: 1, sides: 8 },
-        damageModifier: abilityModifier(ability.dex) + 3,
+        damageModifier: abilityModifier(ability.dex),
       };
     case "wizard": {
       const slots = actor.resources.spellSlots?.level1 ?? 0;
@@ -487,7 +506,15 @@ function resolveAttackAction(
     return;
   }
 
-  const attackRoll = rng.rollDie(20);
+  const hasAdvantage = target.guidingBoltMark?.sourceSlot === actor.slot;
+  const firstRoll = rng.rollDie(20);
+  const secondRoll = hasAdvantage ? rng.rollDie(20) : null;
+  const attackRoll = secondRoll === null ? firstRoll : Math.max(firstRoll, secondRoll);
+
+  if (hasAdvantage) {
+    target.guidingBoltMark = undefined;
+  }
+
   const isCritical = attackRoll === 20;
   const isAutomaticMiss = attackRoll === 1;
   const total = attackRoll + action.attackModifier;
@@ -505,7 +532,8 @@ function resolveAttackAction(
     targetArmorClass: target.armorClass,
     isHit,
     isCritical,
-    summary: `${actor.name} attacks with ${action.actionKey}: d20=${attackRoll} + ${action.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
+    summary:
+      `${actor.name} attacks with ${action.actionKey}${hasAdvantage ? " with advantage" : ""}: d20=${attackRoll} + ${action.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
   });
 
   if (!isHit) {
@@ -516,6 +544,22 @@ function resolveAttackAction(
   const diceCount = isCritical ? action.damageDice.count * 2 : action.damageDice.count;
   const damageRolls = rollDice(rng, diceCount, action.damageDice.sides);
   applyDamage(actor, target, action, damageRolls, round, events);
+
+  if (action.actionKey === "Guiding Bolt") {
+    target.guidingBoltMark = {
+      sourceSlot: actor.slot,
+      grantedRound: round,
+    };
+
+    events.push({
+      type: "effect",
+      round,
+      participantSlot: actor.slot,
+      targetSlot: target.slot,
+      actionKey: action.actionKey,
+      summary: `${target.name} glows with radiant light, granting advantage on the next attack roll made against them before the end of ${actor.name}'s next turn.`,
+    });
+  }
 }
 
 function spendResourceIfNeeded(actor: MutableState, action: AttackProfile) {

@@ -125,7 +125,7 @@ const classTemplates: Record<CharacterClass, CharacterTemplate> = {
   rogue: {
     classKey: "rogue",
     label: "Rogue",
-    summary: "Agile duelist with strong first-hit damage and lighter defenses.",
+    summary: "Agile duelist with sharp initiative, precise rapier attacks, and lighter defenses.",
     level: 1,
     abilityScores: { str: 10, dex: 16, con: 12, int: 12, wis: 10, cha: 14 },
     derivedStats: {
@@ -137,7 +137,7 @@ const classTemplates: Record<CharacterClass, CharacterTemplate> = {
       saveMods: { str: 0, dex: 5, con: 1, int: 3, wis: 0, cha: 2 },
     },
     loadout: {
-      actions: ["Rapier Attack", "Sneak Attack"],
+      actions: ["Rapier Attack"],
       weapons: ["Rapier"],
     },
     resourceState: {},

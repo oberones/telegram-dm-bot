@@ -155,3 +155,71 @@ test("round limit uses hp percentage tie-break", () => {
   assert.equal(result.endReason, "round_limit_hp_pct");
   assert.equal(result.winnerParticipantSlot, 1);
 });
+
+test("rogue rapier damage matches 5e weapon damage plus dexterity", () => {
+  const result = resolveMatch({
+    participants: [
+      participant({ slot: 1, name: "Shade", classKey: "rogue" }),
+      participant({ slot: 2, name: "Bastion", classKey: "fighter" }),
+    ],
+    roundLimit: 1,
+    rng: createDeterministicRandomSource([
+      19,
+      3,
+      18,
+      2,
+      2,
+    ]),
+  });
+
+  const rapierDamage = result.events.find(
+    (event) => event.type === "damage" && event.actionKey === "Rapier Attack",
+  );
+
+  assert.ok(rapierDamage);
+  assert.equal(rapierDamage?.type, "damage");
+  assert.equal(rapierDamage?.modifier, 3);
+  assert.equal(rapierDamage?.total, 5);
+});
+
+test("guiding bolt grants advantage on the next attack roll", () => {
+  const result = resolveMatch({
+    participants: [
+      participant({ slot: 1, name: "Aster", classKey: "cleric" }),
+      participant({ slot: 2, name: "Bastion", classKey: "fighter" }),
+    ],
+    roundLimit: 2,
+    rng: createDeterministicRandomSource([
+      12,
+      5,
+      15,
+      1,
+      1,
+      1,
+      4,
+      2,
+      4,
+      17,
+      2,
+      2,
+      2,
+      2,
+    ]),
+  });
+
+  const effectEvent = result.events.find(
+    (event) => event.type === "effect" && event.actionKey === "Guiding Bolt",
+  );
+  const advantagedAttack = result.events.find(
+    (event) =>
+      event.type === "attack" &&
+      event.actionKey === "Guiding Bolt" &&
+      event.round === 2,
+  );
+
+  assert.ok(effectEvent);
+  assert.ok(advantagedAttack);
+  assert.equal(advantagedAttack?.type, "attack");
+  assert.match(advantagedAttack?.summary ?? "", /with advantage/);
+  assert.equal(advantagedAttack?.attackRoll, 17);
+});
