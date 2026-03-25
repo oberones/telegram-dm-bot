@@ -86,12 +86,12 @@ Completed so far:
 - initial moderation controls for user suspension and character freeze/unfreeze
 - initial recovery controls for pending-dispute cancellation and flagged-match cancel/finalize flows
 - server-side recovery-hint tests plus engine tests
+- documented backup and restore runbook in [BACKUP_RESTORE_RUNBOOK.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/BACKUP_RESTORE_RUNBOOK.md)
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- full audit log coverage across all bot/system actions
-- backup and restore runbooks
+- restore rehearsal against a non-production database
 - broader API/bot integration test coverage
 - release hardening
 
@@ -662,10 +662,10 @@ Implement:
 
 ### Deliverables
 
-- [ ] full audit log coverage
+- [x] full audit log coverage
 - [x] moderation controls
 - [x] recovery tools
-- [ ] backup and restore runbook
+- [x] backup and restore runbook
 
 ### Dependencies
 

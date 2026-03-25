@@ -160,9 +160,21 @@ export async function loginAdmin(
 ) {
   await ensureBootstrapAdmin(app);
 
-  const adminUser = await getAdminUserByEmail(email.trim().toLowerCase());
+  const normalizedEmail = email.trim().toLowerCase();
+  const adminUser = await getAdminUserByEmail(normalizedEmail);
 
   if (!adminUser || adminUser.status !== "active" || !verifyPassword(password, adminUser.password_hash)) {
+    await createAuditLog({
+      actorType: "system",
+      action: "admin_login_failed",
+      targetType: "admin_session",
+      reason: "Invalid email or password",
+      metadata: {
+        email: normalizedEmail,
+        ipAddress: requestIp(request),
+      },
+    });
+
     reply.code(401);
     return {
       error: "Invalid email or password",
