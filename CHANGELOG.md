@@ -1,3 +1,9 @@
+## 0.8.0 (2026-03-25)
+
+### Feat
+
+- add support for deleting charatacters
+
 ## 0.7.0 (2026-03-25)
 
 ### Feat
