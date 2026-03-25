@@ -1,6 +1,15 @@
 import type { FastifyInstance } from "fastify";
 
-import { getDashboardCounts, getMatchById, listDisputes, listMatchEvents, listMatches } from "@dm-bot/db";
+import {
+  getDashboardCounts,
+  getMatchById,
+  listCharacters,
+  listDisputes,
+  listMatchEvents,
+  listMatchParticipants,
+  listMatches,
+  listUsers,
+} from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
 
 export function registerAdminApiRoutes(app: FastifyInstance) {
@@ -40,6 +49,18 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get("/api/users", async () => {
+    return {
+      users: await listUsers(),
+    };
+  });
+
+  app.get("/api/characters", async () => {
+    return {
+      characters: await listCharacters(),
+    };
+  });
+
   app.get("/api/matches/:id", async (request) => {
     const { id } = request.params as { id: string };
     const match = await getMatchById(id);
@@ -52,6 +73,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
 
     return {
       match,
+      participants: await listMatchParticipants(id),
       events: await listMatchEvents(id),
     };
   });

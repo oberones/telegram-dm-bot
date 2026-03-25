@@ -60,6 +60,63 @@ export type MatchRecord = {
   completed_at?: Date | null;
 };
 
+export type AdminUserRecord = {
+  id: string;
+  display_name: string;
+  telegram_user_id: string;
+  telegram_username: string | null;
+  status: UserRecord["status"];
+  last_seen_at: Date | null;
+  character_name: string | null;
+  class_key: string | null;
+  matches_played: number | null;
+  wins: number | null;
+  losses: number | null;
+};
+
+export type AdminCharacterRecord = {
+  id: string;
+  user_id: string;
+  user_display_name: string;
+  telegram_username: string | null;
+  name: string;
+  class_key: string;
+  level: number;
+  status: CharacterRecord["status"];
+  wins: number;
+  losses: number;
+  matches_played: number;
+  created_at: Date;
+  last_match_at: Date | null;
+};
+
+export type AdminMatchListRecord = {
+  id: string;
+  dispute_id: string;
+  status: MatchRecord["status"];
+  winner_character_id: string | null;
+  end_reason: MatchRecord["end_reason"];
+  rounds_completed: number;
+  created_at: Date;
+  completed_at: Date | null;
+  challenger_character_name: string;
+  target_character_name: string;
+  winner_character_name: string | null;
+};
+
+export type MatchParticipantRecord = {
+  id: string;
+  match_id: string;
+  character_id: string;
+  user_id: string;
+  slot: number;
+  is_winner: boolean;
+  character_name: string;
+  user_display_name: string;
+  snapshot: Record<string, unknown>;
+  created_at: Date;
+};
+
 export type MatchEventRecord = {
   id: string;
   match_id: string;
@@ -709,13 +766,93 @@ export async function resolvePendingDispute(params: {
   });
 }
 
-export async function listMatches(limit = 50): Promise<MatchRecord[]> {
+export async function listUsers(limit = 50): Promise<AdminUserRecord[]> {
   return withTransaction(async (client) => {
-    const result = await client.query<MatchRecord>(
+    const result = await client.query<AdminUserRecord>(
       `
-        SELECT id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
-        FROM matches
-        ORDER BY created_at DESC
+        SELECT
+          u.id,
+          u.display_name,
+          u.telegram_user_id,
+          u.telegram_username,
+          u.status,
+          u.last_seen_at,
+          c.name AS character_name,
+          c.class_key,
+          c.matches_played,
+          c.wins,
+          c.losses
+        FROM users u
+        LEFT JOIN characters c
+          ON c.user_id = u.id
+         AND c.status IN ('active', 'frozen')
+        ORDER BY u.created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listCharacters(limit = 100): Promise<AdminCharacterRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdminCharacterRecord>(
+      `
+        SELECT
+          c.id,
+          c.user_id,
+          u.display_name AS user_display_name,
+          u.telegram_username,
+          c.name,
+          c.class_key,
+          c.level,
+          c.status,
+          c.wins,
+          c.losses,
+          c.matches_played,
+          c.created_at,
+          c.last_match_at
+        FROM characters c
+        INNER JOIN users u
+          ON u.id = c.user_id
+        ORDER BY c.created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listMatches(limit = 50): Promise<AdminMatchListRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdminMatchListRecord>(
+      `
+        SELECT
+          m.id,
+          m.dispute_id,
+          m.status,
+          m.winner_character_id,
+          m.end_reason,
+          m.rounds_completed,
+          m.created_at,
+          m.completed_at,
+          challenger_character.name AS challenger_character_name,
+          target_character.name AS target_character_name,
+          winner_character.name AS winner_character_name
+        FROM matches m
+        INNER JOIN disputes d
+          ON d.id = m.dispute_id
+        INNER JOIN characters challenger_character
+          ON challenger_character.id = d.challenger_character_id
+        INNER JOIN characters target_character
+          ON target_character.id = d.target_character_id
+        LEFT JOIN characters winner_character
+          ON winner_character.id = m.winner_character_id
+        ORDER BY m.created_at DESC
         LIMIT $1
       `,
       [limit],
@@ -749,6 +886,36 @@ export async function listMatchEvents(matchId: string): Promise<MatchEventRecord
         FROM match_events
         WHERE match_id = $1
         ORDER BY sequence_number ASC
+      `,
+      [matchId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listMatchParticipants(matchId: string): Promise<MatchParticipantRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchParticipantRecord>(
+      `
+        SELECT
+          mp.id,
+          mp.match_id,
+          mp.character_id,
+          mp.user_id,
+          mp.slot,
+          mp.is_winner,
+          c.name AS character_name,
+          u.display_name AS user_display_name,
+          mp.snapshot,
+          mp.created_at
+        FROM match_participants mp
+        INNER JOIN characters c
+          ON c.id = mp.character_id
+        INNER JOIN users u
+          ON u.id = mp.user_id
+        WHERE mp.match_id = $1
+        ORDER BY mp.slot ASC
       `,
       [matchId],
     );

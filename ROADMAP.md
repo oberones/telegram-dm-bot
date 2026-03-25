@@ -82,11 +82,12 @@ Completed so far:
 - first Telegram vertical slice for `/start`, `/create_character`, `/character`, and `/cancel`
 - deterministic combat engine with persisted event logs and automated tests
 - end-to-end dispute flow with accept/decline, group targeting, match persistence, `/record`, and `/history`
+- read-only admin APIs and browser views for dashboard, disputes, matches, users, and characters
 - Docker-first local/server deployment shape using a shared base Compose file plus local/production overrides
 
 Not completed yet:
 
-- real admin data/API flows
+- admin auth and write-side admin controls
 - moderation and recovery workflows
 - release hardening
 
@@ -587,8 +588,8 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 ### Deliverables
 
 - [ ] admin login
-- [ ] dashboard
-- [ ] detail pages for core entities
+- [x] dashboard
+- [x] detail pages for core entities
 - [ ] initial management tooling
 
 ### Dependencies
