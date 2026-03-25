@@ -859,6 +859,41 @@ export async function declinePendingDispute(disputeId: string, targetUserId: str
   });
 }
 
+export async function getDisputeById(disputeId: string): Promise<DisputeRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<DisputeRecord>(
+      `
+        SELECT id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+        FROM disputes
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [disputeId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function cancelPendingDisputeByAdmin(disputeId: string): Promise<DisputeRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<DisputeRecord>(
+      `
+        UPDATE disputes
+        SET status = 'cancelled',
+            cancelled_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+          AND status = 'pending'
+        RETURNING id, challenger_user_id, target_user_id, challenger_character_id, target_character_id, reason, status, created_at
+      `,
+      [disputeId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function resolvePendingDispute(params: {
   disputeId: string;
   targetUserId: string;
@@ -1293,6 +1328,87 @@ export async function listMatchParticipants(matchId: string): Promise<MatchParti
     );
 
     return result.rows;
+  });
+}
+
+export async function finalizeMatchByAdmin(params: {
+  matchId: string;
+  winnerCharacterId: string;
+  reason: string;
+}): Promise<MatchRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchRecord>(
+      `
+        UPDATE matches
+        SET status = 'finalized_by_admin',
+            winner_character_id = $2,
+            end_reason = 'admin_finalized',
+            completed_at = NOW(),
+            admin_finalization_reason = $3,
+            updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('queued', 'running', 'error')
+        RETURNING id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
+      `,
+      [params.matchId, params.winnerCharacterId, params.reason],
+    );
+
+    const match = result.rows[0] ?? null;
+
+    if (!match) {
+      return null;
+    }
+
+    await client.query(
+      `
+        UPDATE match_participants
+        SET is_winner = (character_id = $2)
+        WHERE match_id = $1
+      `,
+      [params.matchId, params.winnerCharacterId],
+    );
+
+    return match;
+  });
+}
+
+export async function cancelMatchByAdmin(params: {
+  matchId: string;
+  reason: string;
+}): Promise<MatchRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MatchRecord>(
+      `
+        UPDATE matches
+        SET status = 'cancelled',
+            winner_character_id = NULL,
+            end_reason = 'cancelled',
+            completed_at = NOW(),
+            admin_finalization_reason = $2,
+            updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('queued', 'running', 'error')
+        RETURNING id, dispute_id, status, winner_character_id, end_reason, rounds_completed, created_at, completed_at
+      `,
+      [params.matchId, params.reason],
+    );
+
+    const match = result.rows[0] ?? null;
+
+    if (!match) {
+      return null;
+    }
+
+    await client.query(
+      `
+        UPDATE match_participants
+        SET is_winner = FALSE
+        WHERE match_id = $1
+      `,
+      [params.matchId],
+    );
+
+    return match;
   });
 }
 

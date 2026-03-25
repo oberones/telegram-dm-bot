@@ -257,6 +257,12 @@ input {
   gap: 12px;
 }
 
+.inline-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .list-row {
   width: 100%;
   text-align: left;

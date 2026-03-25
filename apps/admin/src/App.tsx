@@ -74,6 +74,7 @@ type MatchSummary = {
 
 type MatchParticipant = {
   id: string;
+  character_id: string;
   slot: number;
   is_winner: boolean;
   character_name: string;
@@ -114,7 +115,7 @@ type AdminData = {
   auditLogs: AuditLog[];
 };
 
-type ViewKey = "dashboard" | "disputes" | "matches" | "users" | "characters" | "audit";
+type ViewKey = "dashboard" | "disputes" | "matches" | "users" | "characters" | "audit" | "recovery";
 
 const navItems: Array<{ key: ViewKey; label: string }> = [
   { key: "dashboard", label: "Dashboard" },
@@ -123,6 +124,7 @@ const navItems: Array<{ key: ViewKey; label: string }> = [
   { key: "users", label: "Users" },
   { key: "characters", label: "Characters" },
   { key: "audit", label: "Audit Log" },
+  { key: "recovery", label: "Recovery" },
 ];
 
 function apiBase() {
@@ -352,6 +354,81 @@ export function App() {
     }
   }
 
+  async function cancelPendingDispute(disputeId: string) {
+    const reason = window.prompt("Why are you cancelling this pending dispute?")?.trim();
+
+    if (!reason) {
+      setError("A cancellation reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/disputes/${disputeId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await refreshAdminData();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Dispute cancellation failed");
+    }
+  }
+
+  async function cancelFlaggedMatch(matchId: string) {
+    const reason = window.prompt("Why are you cancelling this match?")?.trim();
+
+    if (!reason) {
+      setError("A match cancellation reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/matches/${matchId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await refreshAdminData();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Match cancellation failed");
+    }
+  }
+
+  async function finalizeFlaggedMatch(matchId: string) {
+    try {
+      const detail = await fetchJson<MatchDetailResponse>(`/api/matches/${matchId}`);
+      const participantPrompt = detail.participants
+        .map((participant) => `${participant.slot}: ${participant.character_name}`)
+        .join("\n");
+      const selectedSlot = window.prompt(
+        `Choose the winning participant slot for administrative finalization:\n${participantPrompt}`,
+      )?.trim();
+      const reason = window.prompt("Why are you finalizing this match?")?.trim();
+
+      if (!selectedSlot || !reason) {
+        setError("A winner selection and finalization reason are required.");
+        return;
+      }
+
+      const winner = detail.participants.find((participant) => String(participant.slot) === selectedSlot);
+
+      if (!winner) {
+        setError("That participant slot is not valid for this match.");
+        return;
+      }
+
+      await fetchJson(`/api/matches/${matchId}/finalize`, {
+        method: "POST",
+        body: JSON.stringify({
+          winnerCharacterId: winner.character_id,
+          reason,
+        }),
+      });
+      await refreshAdminData();
+      setSelectedMatchId(matchId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Match finalization failed");
+    }
+  }
+
   if (isSessionLoading) {
     return <main className="shell"><section className="panel">Loading admin session...</section></main>;
   }
@@ -535,6 +612,88 @@ export function App() {
               </tbody>
             </table>
           </div>
+        </section>
+      ) : null}
+
+      {!isLoading && view === "recovery" ? (
+        <section className="dashboard-grid">
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Pending disputes</h2>
+              <span>{data.disputes.filter((dispute) => dispute.status === "pending").length}</span>
+            </header>
+            <div className="stack-list">
+              {data.disputes.filter((dispute) => dispute.status === "pending").map((dispute) => (
+                <div className="list-row" key={dispute.id}>
+                  <strong>
+                    {dispute.challenger_character_name} vs {dispute.target_character_name}
+                  </strong>
+                  <span>{formatDate(dispute.created_at)}</span>
+                  <p>{dispute.reason}</p>
+                  <div className="inline-actions">
+                    <button
+                      className="table-action"
+                      disabled={!moderationEnabled}
+                      onClick={() => void cancelPendingDispute(dispute.id)}
+                      type="button"
+                    >
+                      Cancel dispute
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {data.disputes.every((dispute) => dispute.status !== "pending") ? (
+                <div className="list-row">
+                  <strong>No pending disputes need recovery action right now.</strong>
+                </div>
+              ) : null}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Flagged matches</h2>
+              <span>{data.matches.filter((match) => match.status === "running" || match.status === "error").length}</span>
+            </header>
+            <div className="stack-list">
+              {data.matches
+                .filter((match) => match.status === "running" || match.status === "error")
+                .map((match) => (
+                  <div className="list-row" key={match.id}>
+                    <strong>
+                      {match.challenger_character_name} vs {match.target_character_name}
+                    </strong>
+                    <span>{capitalize(match.status)}</span>
+                    <p>
+                      Winner: {match.winner_character_name ?? "pending"} | {capitalize(match.end_reason ?? "unknown")}
+                    </p>
+                    <div className="inline-actions">
+                      <button
+                        className="table-action"
+                        disabled={!moderationEnabled}
+                        onClick={() => void finalizeFlaggedMatch(match.id)}
+                        type="button"
+                      >
+                        Finalize winner
+                      </button>
+                      <button
+                        className="table-action"
+                        disabled={!moderationEnabled}
+                        onClick={() => void cancelFlaggedMatch(match.id)}
+                        type="button"
+                      >
+                        Cancel match
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              {data.matches.every((match) => match.status !== "running" && match.status !== "error") ? (
+                <div className="list-row">
+                  <strong>No running or errored matches are currently flagged.</strong>
+                </div>
+              ) : null}
+            </div>
+          </article>
         </section>
       ) : null}
 
