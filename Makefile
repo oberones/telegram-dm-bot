@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test test-db test-shared test-engine test-server migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
+.PHONY: install typecheck build test test-db test-shared test-engine test-server release-version release-check migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
 
 install:
 	npm install
@@ -28,6 +28,18 @@ test-shared:
 
 test-server:
 	npm run test:server
+
+release-version:
+	node -p "require('./package.json').version"
+
+release-check:
+	npm run typecheck
+	npm run test:engine
+	npm run test:db
+	npm run test:shared
+	npm run test:server
+	npm run docker:prod:config
+	npm run docker:prod:build
 
 migrate:
 	npm run migrate
