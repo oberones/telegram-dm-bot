@@ -1,9 +1,8 @@
-## Unreleased
+## 0.11.1 (2026-03-25)
 
-### Chore
+### Fix
 
-- align monorepo package metadata with release version 0.11.0
-- add beta release checklist
+- update package version
 
 ## 0.11.0 (2026-03-25)
 
