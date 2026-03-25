@@ -1,3 +1,13 @@
+## 0.6.0 (2026-03-25)
+
+### Feat
+
+- add match recovery option
+
+### Fix
+
+- improve suspended user handling
+
 ## 0.5.0 (2026-03-25)
 
 ### Feat
