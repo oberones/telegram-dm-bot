@@ -10,6 +10,7 @@ import {
   getActiveSessionByUserId,
   getPendingIncomingDisputes,
   getPendingOutgoingDisputes,
+  listPublicCharacterStatuses,
   listRecentDisputesForUser,
   listRecentMatchesForUser,
   getUserById,
@@ -23,6 +24,7 @@ import {
   type DisputeRecord,
   type UserDisputeSummaryRecord,
   type UserMatchSummaryRecord,
+  type PublicCharacterStatusRecord,
 } from "@dm-bot/db";
 import {
   resolveMatch,
@@ -284,15 +286,27 @@ function helpText() {
     "/delete_character",
     "/record",
     "/history",
+    "/status",
     "/dispute @username reason",
     "/accept",
     "/decline",
     "/cancel",
     "",
     "Group chats:",
-    "- /start, /help, and /dispute work in groups",
+    "- /start, /help, /status, and /dispute work in groups",
     "- character creation and sheet management should be done in DM",
   ].join("\n");
+}
+
+function formatPublicCharacterStatus(character: PublicCharacterStatusRecord) {
+  const owner = character.telegram_username ? `@${character.telegram_username}` : character.user_display_name;
+
+  return [
+    `${character.name} (${capitalize(character.class_key)} ${character.level})`,
+    `owner: ${owner}`,
+    `status: ${capitalize(character.status)}`,
+    `record: ${character.wins}-${character.losses} (${character.matches_played} matches)`,
+  ].join(" | ");
 }
 
 function formatMatchOutcome(match: UserMatchSummaryRecord) {
@@ -654,6 +668,23 @@ export async function handleHistory(actor: TelegramActor): Promise<OutboundMessa
         (dispute) =>
           `- ${formatTimestamp(dispute.created_at)}: ${formatDisputePerspective(dispute, user.id)}. Status: ${dispute.status}. Reason: ${dispute.reason}`,
       ),
+    ].join("\n"),
+  };
+}
+
+export async function handleStatus(): Promise<OutboundMessage> {
+  const characters = await listPublicCharacterStatuses(24);
+
+  if (characters.length === 0) {
+    return {
+      text: "No arena characters are registered yet. Use /create_character in DM to join the roster.",
+    };
+  }
+
+  return {
+    text: [
+      "Arena roster:",
+      ...characters.map((character, index) => `${index + 1}. ${formatPublicCharacterStatus(character)}`),
     ].join("\n"),
   };
 }

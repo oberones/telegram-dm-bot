@@ -12,6 +12,7 @@ import {
   handleHistory,
   handleHelp,
   handleRecord,
+  handleStatus,
   handleStart,
   handleAccept,
   handleParsedDisputeCommand,
@@ -34,6 +35,7 @@ type TelegramUpdateDeps = {
   handleHistory: typeof handleHistory;
   handleHelp: typeof handleHelp;
   handleRecord: typeof handleRecord;
+  handleStatus: typeof handleStatus;
   handleStart: typeof handleStart;
   handleAccept: typeof handleAccept;
   handleParsedDisputeCommand: typeof handleParsedDisputeCommand;
@@ -53,6 +55,7 @@ const defaultDeps: TelegramUpdateDeps = {
   handleHistory,
   handleHelp,
   handleRecord,
+  handleStatus,
   handleStart,
   handleAccept,
   handleParsedDisputeCommand,
@@ -116,6 +119,11 @@ export async function processTelegramUpdate(
 
   if (normalizedCommand === "/help") {
     await app.telegram.sendMessage(chatId, await deps.handleHelp());
+    return;
+  }
+
+  if (normalizedCommand === "/status") {
+    await app.telegram.sendMessage(chatId, await deps.handleStatus());
     return;
   }
 

@@ -93,6 +93,20 @@ export type AdminCharacterRecord = {
   frozen_reason: string | null;
 };
 
+export type PublicCharacterStatusRecord = {
+  id: string;
+  user_id: string;
+  user_display_name: string;
+  telegram_username: string | null;
+  name: string;
+  class_key: string;
+  level: number;
+  status: CharacterRecord["status"];
+  wins: number;
+  losses: number;
+  matches_played: number;
+};
+
 export type AdminMatchListRecord = {
   id: string;
   dispute_id: string;
@@ -1243,6 +1257,37 @@ export async function listCharacters(limit = 100): Promise<AdminCharacterRecord[
         INNER JOIN users u
           ON u.id = c.user_id
         ORDER BY c.created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listPublicCharacterStatuses(limit = 24): Promise<PublicCharacterStatusRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PublicCharacterStatusRecord>(
+      `
+        SELECT
+          c.id,
+          c.user_id,
+          u.display_name AS user_display_name,
+          u.telegram_username,
+          c.name,
+          c.class_key,
+          c.level,
+          c.status,
+          c.wins,
+          c.losses,
+          c.matches_played
+        FROM characters c
+        INNER JOIN users u
+          ON u.id = c.user_id
+        WHERE c.status IN ('active', 'frozen')
+          AND u.status = 'active'
+        ORDER BY c.matches_played DESC, c.wins DESC, c.created_at ASC
         LIMIT $1
       `,
       [limit],

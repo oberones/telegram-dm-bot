@@ -63,6 +63,7 @@ function buildDeps() {
     handleHistory: async () => ({ text: "history" }),
     handleHelp: async () => ({ text: "help" }),
     handleRecord: async () => ({ text: "record" }),
+    handleStatus: async () => ({ text: "status" }),
     handleStart: async () => ({ text: "welcome" }),
     handleAccept: async () => ({ message: { text: "accepted" } }),
     handleParsedDisputeCommand: async () => ({ message: { text: "parsed dispute" } }),
@@ -109,6 +110,26 @@ test("processTelegramUpdate redirects /create_character in group chats", async (
   );
 
   assert.match(sentMessages[0]!.text, /Character creation works in DM right now/);
+});
+
+test("processTelegramUpdate handles /status in group chats", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 10,
+      message: {
+        message_id: 1,
+        text: "/status",
+        chat: { id: -100, type: "group" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "status" }]);
 });
 
 test("processTelegramUpdate routes reply-based disputes", async () => {

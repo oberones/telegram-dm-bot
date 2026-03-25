@@ -19,7 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@dm-bot/shared": "0.11.0",
+    "@dm-bot/shared": "0.12.1",
     "pg": "^8.16.3"
   },
   "devDependencies": {

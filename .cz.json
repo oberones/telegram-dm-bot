@@ -14,7 +14,19 @@
       "packages/db/package.json:version",
       "packages/domain/package.json:version",
       "packages/engine/package.json:version",
-      "packages/shared/package.json:version"
+      "packages/shared/package.json:version",
+      "apps/server/package.json:\\\"@dm-bot/db\\\":",
+      "apps/server/package.json:\\\"@dm-bot/domain\\\":",
+      "apps/server/package.json:\\\"@dm-bot/shared\\\":",
+      "packages/db/package.json:\\\"@dm-bot/shared\\\":",
+      "packages/domain/package.json:\\\"@dm-bot/db\\\":",
+      "packages/domain/package.json:\\\"@dm-bot/engine\\\":",
+      "packages/domain/package.json:\\\"@dm-bot/shared\\\":",
+      "packages/engine/package.json:\\\"@dm-bot/shared\\\":",
+      "package-lock.json:\\\"@dm-bot/db\\\":",
+      "package-lock.json:\\\"@dm-bot/domain\\\":",
+      "package-lock.json:\\\"@dm-bot/engine\\\":",
+      "package-lock.json:\\\"@dm-bot/shared\\\":"
     ]
   }
 }

@@ -17,9 +17,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@dm-bot/db": "0.11.0",
-    "@dm-bot/engine": "0.11.0",
-    "@dm-bot/shared": "0.11.0"
+    "@dm-bot/db": "0.12.1",
+    "@dm-bot/engine": "0.12.1",
+    "@dm-bot/shared": "0.12.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
