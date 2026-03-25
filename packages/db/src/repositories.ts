@@ -198,6 +198,19 @@ export type RulesVersionRecord = {
   config: Record<string, unknown>;
 };
 
+export type TelegramUpdateRecord = {
+  id: string;
+  telegram_update_id: number;
+  telegram_chat_id: string | null;
+  telegram_user_id: string | null;
+  update_type: string;
+  received_at: Date;
+  processed_at: Date | null;
+  status: "received" | "processed" | "failed";
+  error_summary: string | null;
+  raw_payload: Record<string, unknown> | null;
+};
+
 export type AdminUserAccountRecord = {
   id: string;
   email: string;
@@ -813,6 +826,123 @@ export async function createPendingDispute(input: CreateDisputeInput): Promise<D
     );
 
     return result.rows[0]!;
+  });
+}
+
+export async function beginTelegramUpdateProcessing(params: {
+  telegramUpdateId: number;
+  telegramChatId?: string | null;
+  telegramUserId?: string | null;
+  updateType: string;
+  rawPayload: Record<string, unknown>;
+}): Promise<"process" | "skip"> {
+  return withTransaction(async (client) => {
+    const existing = await client.query<TelegramUpdateRecord>(
+      `
+        SELECT
+          id,
+          telegram_update_id,
+          telegram_chat_id,
+          telegram_user_id,
+          update_type,
+          received_at,
+          processed_at,
+          status,
+          error_summary,
+          raw_payload
+        FROM telegram_updates
+        WHERE telegram_update_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [params.telegramUpdateId],
+    );
+
+    const row = existing.rows[0];
+
+    if (!row) {
+      await client.query(
+        `
+          INSERT INTO telegram_updates (
+            telegram_update_id,
+            telegram_chat_id,
+            telegram_user_id,
+            update_type,
+            status,
+            raw_payload
+          )
+          VALUES ($1, $2, $3, $4, 'received', $5::jsonb)
+        `,
+        [
+          params.telegramUpdateId,
+          params.telegramChatId ?? null,
+          params.telegramUserId ?? null,
+          params.updateType,
+          JSON.stringify(params.rawPayload),
+        ],
+      );
+
+      return "process";
+    }
+
+    if (row.status === "processed" || row.status === "received") {
+      return "skip";
+    }
+
+    await client.query(
+      `
+        UPDATE telegram_updates
+        SET telegram_chat_id = $2,
+            telegram_user_id = $3,
+            update_type = $4,
+            status = 'received',
+            processed_at = NULL,
+            error_summary = NULL,
+            raw_payload = $5::jsonb
+        WHERE telegram_update_id = $1
+      `,
+      [
+        params.telegramUpdateId,
+        params.telegramChatId ?? null,
+        params.telegramUserId ?? null,
+        params.updateType,
+        JSON.stringify(params.rawPayload),
+      ],
+    );
+
+    return "process";
+  });
+}
+
+export async function markTelegramUpdateProcessed(telegramUpdateId: number): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE telegram_updates
+        SET status = 'processed',
+            processed_at = NOW(),
+            error_summary = NULL
+        WHERE telegram_update_id = $1
+      `,
+      [telegramUpdateId],
+    );
+  });
+}
+
+export async function markTelegramUpdateFailed(params: {
+  telegramUpdateId: number;
+  errorSummary: string;
+}): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE telegram_updates
+        SET status = 'failed',
+            error_summary = $2
+        WHERE telegram_update_id = $1
+      `,
+      [params.telegramUpdateId, params.errorSummary],
+    );
   });
 }
 

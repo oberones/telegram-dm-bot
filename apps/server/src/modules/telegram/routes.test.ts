@@ -38,6 +38,9 @@ test("POST /telegram/webhook rejects invalid secret", async () => {
   const calls: unknown[] = [];
 
   registerTelegramRoutes(app, {
+    beginTelegramUpdateProcessing: async () => "process",
+    markTelegramUpdateProcessed: async () => undefined,
+    markTelegramUpdateFailed: async () => undefined,
     processTelegramUpdate: async (...args) => {
       calls.push(args);
     },
@@ -66,6 +69,9 @@ test("POST /telegram/webhook accepts valid secret and processes update", async (
   const calls: unknown[] = [];
 
   registerTelegramRoutes(app, {
+    beginTelegramUpdateProcessing: async () => "process",
+    markTelegramUpdateProcessed: async () => undefined,
+    markTelegramUpdateFailed: async () => undefined,
     processTelegramUpdate: async (_app, update) => {
       calls.push(update);
     },
@@ -92,4 +98,97 @@ test("POST /telegram/webhook accepts valid secret and processes update", async (
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { ok: true });
   assert.equal(calls.length, 1);
+});
+
+test("POST /telegram/webhook skips duplicate updates without reprocessing", async () => {
+  const app = Fastify();
+  app.decorate("config", buildConfig());
+  app.decorate("telegram", {} as any);
+  app.decorate("services", {
+    pingDatabase: async () => true,
+  } as any);
+
+  let processedCalls = 0;
+  let markedProcessed = 0;
+
+  registerTelegramRoutes(app, {
+    beginTelegramUpdateProcessing: async () => "skip",
+    markTelegramUpdateProcessed: async () => {
+      markedProcessed += 1;
+    },
+    markTelegramUpdateFailed: async () => undefined,
+    processTelegramUpdate: async () => {
+      processedCalls += 1;
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/telegram/webhook",
+    headers: {
+      "x-telegram-bot-api-secret-token": "secret",
+    },
+    payload: {
+      update_id: 2,
+      message: {
+        message_id: 1,
+        date: 1,
+        text: "/start",
+        chat: { id: 123, type: "private" },
+        from: { id: 456, first_name: "Test" },
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { ok: true });
+  assert.equal(processedCalls, 0);
+  assert.equal(markedProcessed, 0);
+});
+
+test("POST /telegram/webhook marks failed updates when processing throws", async () => {
+  const app = Fastify();
+  app.decorate("config", buildConfig());
+  app.decorate("telegram", {} as any);
+  app.decorate("services", {
+    pingDatabase: async () => true,
+  } as any);
+
+  const failures: Array<{ telegramUpdateId: number; errorSummary: string }> = [];
+
+  registerTelegramRoutes(app, {
+    beginTelegramUpdateProcessing: async () => "process",
+    markTelegramUpdateProcessed: async () => undefined,
+    markTelegramUpdateFailed: async (params) => {
+      failures.push(params);
+    },
+    processTelegramUpdate: async () => {
+      throw new Error("kaboom");
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/telegram/webhook",
+    headers: {
+      "x-telegram-bot-api-secret-token": "secret",
+    },
+    payload: {
+      update_id: 3,
+      message: {
+        message_id: 1,
+        date: 1,
+        text: "/start",
+        chat: { id: 123, type: "private" },
+        from: { id: 456, first_name: "Test" },
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(failures.length, 1);
+  assert.deepEqual(failures[0], {
+    telegramUpdateId: 3,
+    errorSummary: "kaboom",
+  });
 });
