@@ -1,4 +1,14 @@
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+
+type SessionResponse = {
+  authenticated: boolean;
+  adminUser?: {
+    id: string;
+    email: string;
+    displayName: string;
+    role: string;
+  };
+};
 
 type DashboardResponse = {
   system: {
@@ -26,7 +36,6 @@ type DisputeSummary = {
 type UserSummary = {
   id: string;
   display_name: string;
-  telegram_user_id: string;
   telegram_username: string | null;
   status: string;
   last_seen_at: string | null;
@@ -39,9 +48,7 @@ type UserSummary = {
 
 type CharacterSummary = {
   id: string;
-  user_id: string;
   user_display_name: string;
-  telegram_username: string | null;
   name: string;
   class_key: string;
   level: number;
@@ -49,7 +56,6 @@ type CharacterSummary = {
   wins: number;
   losses: number;
   matches_played: number;
-  created_at: string;
   last_match_at: string | null;
 };
 
@@ -57,14 +63,13 @@ type MatchSummary = {
   id: string;
   dispute_id: string;
   status: string;
-  winner_character_id: string | null;
+  winner_character_name: string | null;
   end_reason: string | null;
   rounds_completed: number;
   created_at: string;
   completed_at: string | null;
   challenger_character_name: string;
   target_character_name: string;
-  winner_character_name: string | null;
 };
 
 type MatchParticipant = {
@@ -84,9 +89,7 @@ type MatchEvent = {
 };
 
 type MatchDetailResponse = {
-  match: MatchSummary & {
-    winner_character_id: string | null;
-  };
+  match: MatchSummary;
   participants: MatchParticipant[];
   events: MatchEvent[];
 };
@@ -116,10 +119,6 @@ function apiBase() {
     return explicitBase.replace(/\/$/, "");
   }
 
-  if (window.location.port === "8080") {
-    return "";
-  }
-
   if (window.location.port === "5173") {
     return `${window.location.protocol}//${window.location.hostname}:3000`;
   }
@@ -127,11 +126,19 @@ function apiBase() {
   return "";
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase()}${path}`);
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiBase()}${path}`, {
+    credentials: "include",
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
 
   if (!response.ok) {
-    throw new Error(`Request failed for ${path} (${response.status})`);
+    const errorBody = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorBody.error ?? `Request failed for ${path}`);
   }
 
   return response.json() as Promise<T>;
@@ -149,25 +156,52 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1).replaceAll("_", " ");
 }
 
-export function App() {
-  const [view, setView] = useState<ViewKey>("dashboard");
-  const [data, setData] = useState<AdminData>({
+function emptyAdminData(): AdminData {
+  return {
     dashboard: null,
     disputes: [],
     users: [],
     characters: [],
     matches: [],
-  });
+  };
+}
+
+export function App() {
+  const [session, setSession] = useState<SessionResponse | null>(null);
+  const [view, setView] = useState<ViewKey>("dashboard");
+  const [data, setData] = useState<AdminData>(emptyAdminData);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [matchDetail, setMatchDetail] = useState<MatchDetailResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
 
   useEffect(() => {
-    let isActive = true;
+    fetchJson<SessionResponse>("/api/session")
+      .then((response) => {
+        setSession(response);
+      })
+      .catch(() => {
+        setSession({ authenticated: false });
+      })
+      .finally(() => {
+        setIsSessionLoading(false);
+      });
+  }, []);
 
-    startLoading();
+  useEffect(() => {
+    if (!session?.authenticated) {
+      setData(emptyAdminData());
+      setSelectedMatchId(null);
+      setMatchDetail(null);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
 
     Promise.all([
       fetchJson<DashboardResponse>("/api/dashboard"),
@@ -177,10 +211,6 @@ export function App() {
       fetchJson<{ characters: CharacterSummary[] }>("/api/characters"),
     ])
       .then(([dashboard, disputes, matches, users, characters]) => {
-        if (!isActive) {
-          return;
-        }
-
         setData({
           dashboard,
           disputes: disputes.disputes,
@@ -188,62 +218,113 @@ export function App() {
           users: users.users,
           characters: characters.characters,
         });
-
-        const firstMatchId = matches.matches[0]?.id ?? null;
-        setSelectedMatchId(firstMatchId);
+        setSelectedMatchId(matches.matches[0]?.id ?? null);
       })
       .catch((caughtError: unknown) => {
-        if (!isActive) {
-          return;
-        }
-
         setError(caughtError instanceof Error ? caughtError.message : "Unknown admin loading error");
       })
       .finally(() => {
-        if (isActive) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       });
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
+  }, [session]);
 
   useEffect(() => {
-    if (!selectedMatchId) {
+    if (!session?.authenticated || !selectedMatchId) {
       setMatchDetail(null);
       return;
     }
 
-    let isActive = true;
     setIsDetailLoading(true);
 
     fetchJson<MatchDetailResponse>(`/api/matches/${selectedMatchId}`)
       .then((response) => {
-        if (isActive) {
-          setMatchDetail(response);
-        }
+        setMatchDetail(response);
       })
       .catch(() => {
-        if (isActive) {
-          setMatchDetail(null);
-        }
+        setMatchDetail(null);
       })
       .finally(() => {
-        if (isActive) {
-          setIsDetailLoading(false);
-        }
+        setIsDetailLoading(false);
+      });
+  }, [selectedMatchId, session]);
+
+  async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const nextSession = await fetchJson<SessionResponse>("/api/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+        }),
       });
 
-    return () => {
-      isActive = false;
-    };
-  }, [selectedMatchId]);
+      setSession(nextSession);
+      setLoginPassword("");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Login failed");
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
-  function startLoading() {
-    setIsLoading(true);
-    setError(null);
+  async function handleLogout() {
+    await fetchJson("/api/logout", { method: "POST" }).catch(() => undefined);
+    setSession({ authenticated: false });
+    setData(emptyAdminData());
+    setSelectedMatchId(null);
+    setMatchDetail(null);
+  }
+
+  if (isSessionLoading) {
+    return <main className="shell"><section className="panel">Loading admin session...</section></main>;
+  }
+
+  if (!session?.authenticated) {
+    return (
+      <main className="shell">
+        <section className="hero">
+          <div>
+            <p className="eyebrow">Dungeon Master Bot</p>
+            <h1>Admin sign-in</h1>
+            <p className="lede">
+              This control room is protected. Sign in with the bootstrap admin credentials from your environment.
+            </p>
+          </div>
+        </section>
+
+        {error ? <section className="error-banner">{error}</section> : null}
+
+        <section className="panel auth-panel">
+          <form className="auth-form" onSubmit={handleLoginSubmit}>
+            <label>
+              <span>Email</span>
+              <input
+                autoComplete="username"
+                onChange={(event) => setLoginEmail(event.target.value)}
+                type="email"
+                value={loginEmail}
+              />
+            </label>
+            <label>
+              <span>Password</span>
+              <input
+                autoComplete="current-password"
+                onChange={(event) => setLoginPassword(event.target.value)}
+                type="password"
+                value={loginPassword}
+              />
+            </label>
+            <button className="primary-button" disabled={isLoading} type="submit">
+              {isLoading ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
   }
 
   const stats = data.dashboard?.stats;
@@ -262,13 +343,16 @@ export function App() {
 
         <div className="hero-meta">
           <div className="stat-chip">
-            <span>Environment</span>
-            <strong>{data.dashboard?.system.environment ?? "loading"}</strong>
+            <span>Signed in as</span>
+            <strong>{session.adminUser?.displayName}</strong>
           </div>
           <div className="stat-chip">
-            <span>Rules</span>
-            <strong>{data.dashboard?.system.defaultRulesVersion ?? "loading"}</strong>
+            <span>Role</span>
+            <strong>{capitalize(session.adminUser?.role ?? "unknown")}</strong>
           </div>
+          <button className="secondary-button" onClick={handleLogout} type="button">
+            Sign out
+          </button>
         </div>
       </section>
 

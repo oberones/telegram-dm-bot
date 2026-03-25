@@ -18,6 +18,10 @@ export type AppConfig = {
   disableNewDisputes: boolean;
   telegramDeliveryMode: TelegramDeliveryMode;
   telegramPollingTimeoutSeconds: number;
+  adminBootstrapEmail?: string | undefined;
+  adminBootstrapPassword?: string | undefined;
+  adminBootstrapDisplayName?: string | undefined;
+  adminBootstrapRole?: "super_admin" | "operator" | "moderator" | undefined;
 };
 
 function readString(name: string, fallback?: string): string {
@@ -56,6 +60,11 @@ function readBoolean(name: string, fallback = false): boolean {
   return raw === "true";
 }
 
+function readOptionalString(name: string): string | undefined {
+  const value = process.env[name];
+  return value ? value : undefined;
+}
+
 export function loadConfig(): AppConfig {
   return {
     nodeEnv: readString("NODE_ENV", "development"),
@@ -80,5 +89,9 @@ export function loadConfig(): AppConfig {
     disableNewDisputes: readBoolean("DISABLE_NEW_DISPUTES", false),
     telegramDeliveryMode: readString("TELEGRAM_DELIVERY_MODE", "webhook") as TelegramDeliveryMode,
     telegramPollingTimeoutSeconds: readNumber("TELEGRAM_POLLING_TIMEOUT_SECONDS", 30),
+    adminBootstrapEmail: readOptionalString("ADMIN_BOOTSTRAP_EMAIL"),
+    adminBootstrapPassword: readOptionalString("ADMIN_BOOTSTRAP_PASSWORD"),
+    adminBootstrapDisplayName: readOptionalString("ADMIN_BOOTSTRAP_DISPLAY_NAME"),
+    adminBootstrapRole: readOptionalString("ADMIN_BOOTSTRAP_ROLE") as AppConfig["adminBootstrapRole"],
   };
 }

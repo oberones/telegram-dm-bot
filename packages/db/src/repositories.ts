@@ -174,6 +174,25 @@ export type RulesVersionRecord = {
   config: Record<string, unknown>;
 };
 
+export type AdminUserAccountRecord = {
+  id: string;
+  email: string;
+  display_name: string;
+  role: "super_admin" | "operator" | "moderator";
+  status: "active" | "disabled";
+  password_hash: string | null;
+  last_login_at: Date | null;
+};
+
+export type AdminSessionRecord = {
+  id: string;
+  admin_user_id: string;
+  session_token_hash: string;
+  expires_at: Date;
+  last_seen_at: Date;
+  created_at: Date;
+};
+
 type TelegramUserInput = {
   telegramUserId: string;
   telegramUsername?: string | undefined;
@@ -524,6 +543,191 @@ export async function getUserByTelegramUserId(telegramUserId: string): Promise<U
     );
 
     return result.rows[0] ?? null;
+  });
+}
+
+export async function upsertBootstrapAdmin(params: {
+  email: string;
+  displayName: string;
+  role: AdminUserAccountRecord["role"];
+  passwordHash: string;
+}): Promise<AdminUserAccountRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdminUserAccountRecord>(
+      `
+        INSERT INTO admin_users (
+          email,
+          display_name,
+          role,
+          status,
+          password_hash,
+          updated_at
+        )
+        VALUES ($1, $2, $3, 'active', $4, NOW())
+        ON CONFLICT (email)
+        DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          role = EXCLUDED.role,
+          password_hash = EXCLUDED.password_hash,
+          updated_at = NOW()
+        RETURNING id, email, display_name, role, status, password_hash, last_login_at
+      `,
+      [params.email.toLowerCase(), params.displayName, params.role, params.passwordHash],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function getAdminUserByEmail(email: string): Promise<AdminUserAccountRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdminUserAccountRecord>(
+      `
+        SELECT id, email, display_name, role, status, password_hash, last_login_at
+        FROM admin_users
+        WHERE lower(email) = lower($1)
+        LIMIT 1
+      `,
+      [email],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function getAdminSessionWithUserByHash(sessionTokenHash: string): Promise<{
+  session: AdminSessionRecord;
+  adminUser: AdminUserAccountRecord;
+} | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<
+      AdminSessionRecord & {
+        email: string;
+        display_name: string;
+        role: AdminUserAccountRecord["role"];
+        status: AdminUserAccountRecord["status"];
+        password_hash: string | null;
+        admin_last_login_at: Date | null;
+      }
+    >(
+      `
+        SELECT
+          s.id,
+          s.admin_user_id,
+          s.session_token_hash,
+          s.expires_at,
+          s.last_seen_at,
+          s.created_at,
+          u.email,
+          u.display_name,
+          u.role,
+          u.status,
+          u.password_hash,
+          u.last_login_at AS admin_last_login_at
+        FROM admin_sessions s
+        INNER JOIN admin_users u
+          ON u.id = s.admin_user_id
+        WHERE s.session_token_hash = $1
+          AND s.expires_at > NOW()
+        LIMIT 1
+      `,
+      [sessionTokenHash],
+    );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      session: {
+        id: row.id,
+        admin_user_id: row.admin_user_id,
+        session_token_hash: row.session_token_hash,
+        expires_at: row.expires_at,
+        last_seen_at: row.last_seen_at,
+        created_at: row.created_at,
+      },
+      adminUser: {
+        id: row.admin_user_id,
+        email: row.email,
+        display_name: row.display_name,
+        role: row.role,
+        status: row.status,
+        password_hash: row.password_hash,
+        last_login_at: row.admin_last_login_at,
+      },
+    };
+  });
+}
+
+export async function createAdminSession(params: {
+  adminUserId: string;
+  sessionTokenHash: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  expiresAt: Date;
+}): Promise<AdminSessionRecord> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE admin_users
+        SET last_login_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [params.adminUserId],
+    );
+
+    const result = await client.query<AdminSessionRecord>(
+      `
+        INSERT INTO admin_sessions (
+          admin_user_id,
+          session_token_hash,
+          ip_address,
+          user_agent,
+          expires_at,
+          last_seen_at
+        )
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        RETURNING id, admin_user_id, session_token_hash, expires_at, last_seen_at, created_at
+      `,
+      [
+        params.adminUserId,
+        params.sessionTokenHash,
+        params.ipAddress ?? null,
+        params.userAgent ?? null,
+        params.expiresAt,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function touchAdminSession(sessionId: string): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE admin_sessions
+        SET last_seen_at = NOW()
+        WHERE id = $1
+      `,
+      [sessionId],
+    );
+  });
+}
+
+export async function deleteAdminSessionByHash(sessionTokenHash: string): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `
+        DELETE FROM admin_sessions
+        WHERE session_token_hash = $1
+      `,
+      [sessionTokenHash],
+    );
   });
 }
 

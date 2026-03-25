@@ -587,7 +587,7 @@ Prefer read-only inspection first, then narrow edit powers after the data model 
 
 ### Deliverables
 
-- [ ] admin login
+- [x] admin login
 - [x] dashboard
 - [x] detail pages for core entities
 - [ ] initial management tooling
