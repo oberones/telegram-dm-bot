@@ -65,8 +65,53 @@ function readOptionalString(name: string): string | undefined {
   return value ? value : undefined;
 }
 
+function assertSafeProductionConfig(config: AppConfig) {
+  if (config.appEnv !== "production") {
+    return;
+  }
+
+  const invalidValues = new Map<string, string>([
+    ["TELEGRAM_BOT_TOKEN", config.telegramBotToken],
+    ["TELEGRAM_WEBHOOK_SECRET", config.telegramWebhookSecret],
+    ["SESSION_SECRET", config.sessionSecret],
+  ]);
+
+  for (const [name, value] of invalidValues) {
+    if (
+      value === "replace-me" ||
+      value === "replace-with-a-long-random-string" ||
+      value.trim().length < 16
+    ) {
+      throw new Error(
+        `Unsafe production configuration: ${name} must be set to a strong non-placeholder value before startup.`,
+      );
+    }
+  }
+
+  if (!config.cookieSecure) {
+    throw new Error("Unsafe production configuration: COOKIE_SECURE must be true in production.");
+  }
+
+  if (config.telegramDeliveryMode !== "webhook") {
+    throw new Error("Unsafe production configuration: TELEGRAM_DELIVERY_MODE must be webhook in production.");
+  }
+
+  if (config.telegramWebhookUrl.includes("example.com")) {
+    throw new Error("Unsafe production configuration: TELEGRAM_WEBHOOK_URL must not use the example placeholder in production.");
+  }
+
+  if (
+    config.adminBootstrapEmail === "admin@example.com" ||
+    config.adminBootstrapPassword === "change-me"
+  ) {
+    throw new Error(
+      "Unsafe production configuration: bootstrap admin credentials must be changed from their defaults before startup.",
+    );
+  }
+}
+
 export function loadConfig(): AppConfig {
-  return {
+  const config: AppConfig = {
     nodeEnv: readString("NODE_ENV", "development"),
     appEnv: readString("APP_ENV", "local") as AppEnv,
     port: readNumber("PORT", 3000),
@@ -94,4 +139,8 @@ export function loadConfig(): AppConfig {
     adminBootstrapDisplayName: readOptionalString("ADMIN_BOOTSTRAP_DISPLAY_NAME"),
     adminBootstrapRole: readOptionalString("ADMIN_BOOTSTRAP_ROLE") as AppConfig["adminBootstrapRole"],
   };
+
+  assertSafeProductionConfig(config);
+
+  return config;
 }
