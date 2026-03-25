@@ -15,6 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "migrate": "node --conditions=source --import tsx src/migrate.ts",
+    "test": "node --conditions=source --import tsx --test src/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
