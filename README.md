@@ -22,7 +22,7 @@ The current product supports:
 - Automated match resolution with persisted event logs
 - Record and history views for users
 - Soft deletion of characters by retiring them
-- A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, and persistent loot
+- A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, persistent loot, and encounter XP
 - Read-only and operational admin views for users, characters, disputes, matches, recovery state, and audit logs
 - Admin moderation actions such as suspend/reactivate user and freeze/unfreeze character
 - Admin recovery actions such as cancel pending dispute, cancel/finalize flagged match, fail stuck crawler runs, and mark stuck crawler encounters errored
@@ -276,8 +276,8 @@ Current crawler capabilities:
 - create and join parties in group chats
 - ready up and start seeded procedural runs
 - traverse combat, elite, boss, treasure, event, and rest rooms
-- auto-resolve PvE encounters against procedurally selected monsters
-- earn persistent loot, consumables, and cumulative gold
+- resolve round-based PvE encounters against procedurally selected monsters
+- earn persistent loot, consumables, cumulative gold, and survivor-only encounter XP
 - inspect or resume the current crawler run with `/run`
 - inspect and use `/inventory` in DM
 - inspect and manage `/equipment` in DM

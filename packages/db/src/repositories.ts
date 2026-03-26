@@ -18,6 +18,8 @@ export type CharacterRecord = {
   name: string;
   class_key: string;
   level: number;
+  crawler_level: number;
+  crawler_xp: number;
   status: "active" | "frozen" | "retired";
   rules_version_id: string;
   wins: number;
@@ -27,6 +29,7 @@ export type CharacterRecord = {
   ability_scores: Record<string, unknown>;
   loadout: Record<string, unknown>;
   resource_state: Record<string, unknown>;
+  crawler_stats: Record<string, unknown>;
 };
 
 export type DisputeRecord = {
@@ -468,6 +471,11 @@ export type RunRewardRecord = {
   created_at: Date;
 };
 
+export type CharacterCrawlerProgressRecord = Pick<
+  CharacterRecord,
+  "id" | "crawler_level" | "crawler_xp" | "crawler_stats"
+>;
+
 type TelegramUserInput = {
   telegramUserId: string;
   telegramUsername?: string | undefined;
@@ -645,6 +653,8 @@ export async function getActiveCharacterByUserId(userId: string): Promise<Charac
           name,
           class_key,
           level,
+          crawler_level,
+          crawler_xp,
           status,
           rules_version_id,
           wins,
@@ -653,7 +663,8 @@ export async function getActiveCharacterByUserId(userId: string): Promise<Charac
           derived_stats,
           ability_scores,
           loadout,
-          resource_state
+          resource_state,
+          crawler_stats
         FROM characters
         WHERE user_id = $1
           AND status IN ('active', 'frozen')
@@ -676,6 +687,8 @@ export async function getCharacterById(characterId: string): Promise<CharacterRe
           name,
           class_key,
           level,
+          crawler_level,
+          crawler_xp,
           status,
           rules_version_id,
           wins,
@@ -684,7 +697,8 @@ export async function getCharacterById(characterId: string): Promise<CharacterRe
           derived_stats,
           ability_scores,
           loadout,
-          resource_state
+          resource_state,
+          crawler_stats
         FROM characters
         WHERE id = $1
         LIMIT 1
@@ -706,6 +720,8 @@ export async function getEligibleCharacterByUserId(userId: string): Promise<Char
           name,
           class_key,
           level,
+          crawler_level,
+          crawler_xp,
           status,
           rules_version_id,
           wins,
@@ -714,7 +730,8 @@ export async function getEligibleCharacterByUserId(userId: string): Promise<Char
           derived_stats,
           ability_scores,
           loadout,
-          resource_state
+          resource_state,
+          crawler_stats
         FROM characters
         WHERE user_id = $1
           AND status = 'active'
@@ -907,6 +924,8 @@ async function insertCharacter(
         name,
         class_key,
         level,
+        crawler_level,
+        crawler_xp,
         status,
         rules_version_id,
         wins,
@@ -915,7 +934,8 @@ async function insertCharacter(
         derived_stats,
         ability_scores,
         loadout,
-        resource_state
+        resource_state,
+        crawler_stats
     `,
     [
       input.userId,
@@ -1691,6 +1711,8 @@ export async function setCharacterStatus(params: {
           name,
           class_key,
           level,
+          crawler_level,
+          crawler_xp,
           status,
           rules_version_id,
           wins,
@@ -1699,7 +1721,8 @@ export async function setCharacterStatus(params: {
           derived_stats,
           ability_scores,
           loadout,
-          resource_state
+          resource_state,
+          crawler_stats
       `,
       [
         params.characterId,
@@ -3311,6 +3334,49 @@ export async function createRunReward(input: RunRewardInput): Promise<RunRewardR
     );
 
     return result.rows[0]!;
+  });
+}
+
+export async function listRunRewardsForEncounter(encounterId: string): Promise<RunRewardRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRewardRecord>(
+      `
+        SELECT *
+        FROM run_rewards
+        WHERE encounter_id = $1
+        ORDER BY created_at ASC, id ASC
+      `,
+      [encounterId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function incrementCharacterCrawlerXp(params: {
+  characterId: string;
+  xpDelta: number;
+  crawlerStatsPatch?: Record<string, unknown>;
+}): Promise<CharacterCrawlerProgressRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<CharacterCrawlerProgressRecord>(
+      `
+        UPDATE characters
+        SET
+          crawler_xp = crawler_xp + $2,
+          crawler_stats = crawler_stats || $3::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, crawler_level, crawler_xp, crawler_stats
+      `,
+      [
+        params.characterId,
+        params.xpDelta,
+        JSON.stringify(params.crawlerStatsPatch ?? {}),
+      ],
+    );
+
+    return result.rows[0] ?? null;
   });
 }
 

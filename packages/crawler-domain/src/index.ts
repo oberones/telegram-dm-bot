@@ -26,12 +26,14 @@ import {
   getPartyMemberByPartyAndUser,
   getRunRoomDetailById,
   getUserById,
+  incrementCharacterCrawlerXp,
   listEquipmentLoadoutsForCharacter,
   listEncountersForRun,
   listInventoryItemsForCharacter,
   listLootTemplates,
   listMonsterTemplates,
   listPartyMemberDetails,
+  listRunRewardsForEncounter,
   listRunRewardsForRoom,
   listRunRoomDetails,
   setPartyMemberLeft,
@@ -77,7 +79,6 @@ import {
   initializeEncounterState,
   resolveEncounterRound,
   resolveRetreatAttempt,
-  resolveEncounter,
   type EncounterEvent,
   type EncounterParticipant,
   type EncounterState,
@@ -719,6 +720,52 @@ type GrantedRewardSummary = {
   summaryLines: string[];
 };
 
+export type EncounterXpAward = {
+  characterId: string;
+  characterName: string;
+  xpGranted: number;
+  totalXp: number;
+  crawlerLevel: number;
+};
+
+export function encounterXpForRoomType(roomType: RunRoomDetailRecord["room_type"]) {
+  switch (roomType) {
+    case "combat":
+      return 25;
+    case "elite_combat":
+      return 50;
+    case "boss":
+      return 100;
+    default:
+      return 0;
+  }
+}
+
+export function buildEncounterXpRecipients(params: {
+  members: PartyMemberDetailRecord[];
+  finalParticipants: EncounterResolutionResult["finalParticipants"];
+  xpPerSurvivor: number;
+}) {
+  if (params.xpPerSurvivor <= 0) {
+    return [];
+  }
+
+  return activeMembers(params.members).flatMap((member) => {
+    const finalParticipant = params.finalParticipants.find((participant) => participant.id.endsWith(member.character_id));
+
+    if (!finalParticipant || finalParticipant.currentHitPoints <= 0) {
+      return [];
+    }
+
+    return [{
+      characterId: member.character_id,
+      userId: member.user_id,
+      characterName: member.character_name,
+      xpGranted: params.xpPerSurvivor,
+    }];
+  });
+}
+
 function summarizeRewardRows(rewardRows: RunRewardRecord[]) {
   const byRecipient = new Map<string, string[]>();
 
@@ -740,11 +787,16 @@ function summarizeRewardRows(rewardRows: RunRewardRecord[]) {
   return [...byRecipient.entries()].map(([recipientName, rewards]) => `- ${recipientName}: ${rewards.join(", ")}`);
 }
 
+function summarizeEncounterXpAwards(xpAwards: EncounterXpAward[]) {
+  return xpAwards.map((award) => `- ${award.characterName}: +${award.xpGranted} XP (${award.totalXp} total)`);
+}
+
 function formatEncounterVictoryMessage(
   run: AdventureRunRecord,
   room: RunRoomDetailRecord,
   result: EncounterResolutionResult,
   rewards: GrantedRewardSummary,
+  xpAwards: EncounterXpAward[],
   next: RunRoomDetailRecord | null,
   memberCount: number,
 ) {
@@ -762,10 +814,17 @@ function formatEncounterVictoryMessage(
     "",
     "Rewards",
     ...(rewards.summaryLines.length > 0 ? rewards.summaryLines : ["- No rewards granted."]),
-    "",
-    "Combat Log",
-    ...formatEncounterLog(result.events),
   ];
+
+  if (xpAwards.length > 0) {
+    lines.push("");
+    lines.push("Experience");
+    lines.push(...summarizeEncounterXpAwards(xpAwards));
+  }
+
+  lines.push("");
+  lines.push("Combat Log");
+  lines.push(...formatEncounterLog(result.events));
 
   if (next) {
     const prompt = next.prompt_payload as { title?: string; description?: string; roomType?: string };
@@ -1607,6 +1666,97 @@ async function grantEncounterRewards(
     rewardRows,
     summaryLines: summarizeRewardRows(rewardRows),
   };
+}
+
+async function grantEncounterXp(params: {
+  run: AdventureRunRecord;
+  room: RunRoomDetailRecord;
+  encounterId: string;
+  members: PartyMemberDetailRecord[];
+  result: EncounterResolutionResult;
+}) {
+  const existingXpRewards = (await listRunRewardsForEncounter(params.encounterId)).filter(
+    (reward) => reward.reward_kind === "crawler_xp",
+  );
+
+  if (existingXpRewards.length > 0) {
+    return existingXpRewards.map((reward) => ({
+      characterId: reward.recipient_character_id ?? "unknown",
+      characterName: typeof reward.reward_payload.recipientName === "string"
+        ? reward.reward_payload.recipientName
+        : "Unknown adventurer",
+      xpGranted: typeof reward.reward_payload.xpGranted === "number" ? reward.reward_payload.xpGranted : reward.quantity,
+      totalXp: typeof reward.reward_payload.totalXp === "number" ? reward.reward_payload.totalXp : 0,
+      crawlerLevel: typeof reward.reward_payload.crawlerLevel === "number" ? reward.reward_payload.crawlerLevel : 1,
+    }));
+  }
+
+  const xpPerSurvivor = encounterXpForRoomType(params.room.room_type);
+  const recipients = buildEncounterXpRecipients({
+    members: params.members,
+    finalParticipants: params.result.finalParticipants,
+    xpPerSurvivor,
+  });
+
+  const awards: EncounterXpAward[] = [];
+
+  for (const recipient of recipients) {
+    const progress = await incrementCharacterCrawlerXp({
+      characterId: recipient.characterId,
+      xpDelta: recipient.xpGranted,
+      crawlerStatsPatch: {
+        lastCrawlerXpAwardedAt: new Date().toISOString(),
+        lastCrawlerXpSource: "encounter",
+      },
+    });
+
+    if (!progress) {
+      continue;
+    }
+
+    await createRunReward({
+      runId: params.run.id,
+      roomId: params.room.id,
+      encounterId: params.encounterId,
+      recipientUserId: recipient.userId,
+      recipientCharacterId: recipient.characterId,
+      rewardKind: "crawler_xp",
+      status: "granted",
+      quantity: recipient.xpGranted,
+      rewardPayload: {
+        recipientName: recipient.characterName,
+        xpGranted: recipient.xpGranted,
+        totalXp: progress.crawler_xp,
+        crawlerLevel: progress.crawler_level,
+      },
+    });
+
+    awards.push({
+      characterId: recipient.characterId,
+      characterName: recipient.characterName,
+      xpGranted: recipient.xpGranted,
+      totalXp: progress.crawler_xp,
+      crawlerLevel: progress.crawler_level,
+    });
+  }
+
+  if (awards.length > 0) {
+    await createAuditLog({
+      actorType: "system",
+      action: "crawler_xp_granted",
+      targetType: "encounter",
+      targetId: params.encounterId,
+      metadata: {
+        runId: params.run.id,
+        roomId: params.room.id,
+        roomType: params.room.room_type,
+        xpPerSurvivor,
+        awards,
+      },
+    });
+  }
+
+  return awards;
 }
 
 async function grantRoomRewards(
@@ -2781,6 +2931,18 @@ export async function handleCrawlerCallback(
         },
       });
       const rewards = await grantEncounterRewards(run, room, encounter.id, members);
+      const xpAwards = await grantEncounterXp({
+        run,
+        room,
+        encounterId: encounter.id,
+        members,
+        result: {
+          winningSide: "player",
+          roundsCompleted: roundResult.roundsCompleted,
+          events: roundResult.events,
+          finalParticipants: roundResult.finalParticipants,
+        },
+      });
       await updateRunRoom({
         roomId: room.id,
         status: "completed",
@@ -2818,6 +2980,7 @@ export async function handleCrawlerCallback(
               finalParticipants: roundResult.finalParticipants,
             },
             rewards,
+            xpAwards,
             null,
             memberCount,
           ),
@@ -2847,6 +3010,7 @@ export async function handleCrawlerCallback(
             finalParticipants: roundResult.finalParticipants,
           },
           rewards,
+          xpAwards,
           next,
           memberCount,
         ),

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPartyLobbyButtonLabels, canStartCrawlerParty, describeRunPresentationState, isEligibleForCrawlerParty } from "./index.js";
+import {
+  buildEncounterXpRecipients,
+  buildPartyLobbyButtonLabels,
+  canStartCrawlerParty,
+  describeRunPresentationState,
+  encounterXpForRoomType,
+  isEligibleForCrawlerParty,
+} from "./index.js";
 
 test("active users with active characters can join crawler parties", () => {
   assert.equal(
@@ -149,5 +156,88 @@ test("completed or stale runs are inspect-only and cannot be resumed", () => {
       buttonAllowed: false,
       showRoomPrompt: false,
     },
+  );
+});
+
+test("encounter xp scales by room type", () => {
+  assert.equal(encounterXpForRoomType("combat"), 25);
+  assert.equal(encounterXpForRoomType("elite_combat"), 50);
+  assert.equal(encounterXpForRoomType("boss"), 100);
+});
+
+test("encounter xp only goes to surviving active party members", () => {
+  assert.deepEqual(
+    buildEncounterXpRecipients({
+      members: [
+        {
+          id: "pm-1",
+          party_id: "party-1",
+          user_id: "user-1",
+          character_id: "char-1",
+          status: "ready",
+          joined_at: new Date("2026-03-26T12:00:00Z"),
+          ready_at: new Date("2026-03-26T12:01:00Z"),
+          left_at: null,
+          created_at: new Date("2026-03-26T12:00:00Z"),
+          updated_at: new Date("2026-03-26T12:01:00Z"),
+          user_display_name: "Alice",
+          telegram_username: "alice",
+          character_name: "Alyndra",
+          class_key: "fighter",
+        },
+        {
+          id: "pm-2",
+          party_id: "party-1",
+          user_id: "user-2",
+          character_id: "char-2",
+          status: "ready",
+          joined_at: new Date("2026-03-26T12:00:00Z"),
+          ready_at: new Date("2026-03-26T12:01:00Z"),
+          left_at: null,
+          created_at: new Date("2026-03-26T12:00:00Z"),
+          updated_at: new Date("2026-03-26T12:01:00Z"),
+          user_display_name: "Borin",
+          telegram_username: "borin",
+          character_name: "Borin",
+          class_key: "cleric",
+        },
+      ],
+      finalParticipants: [
+        {
+          id: "player-1-char-1",
+          name: "Alyndra",
+          side: "player",
+          currentHitPoints: 4,
+          maxHitPoints: 12,
+          damageDealt: 7,
+          isDefeated: false,
+        },
+        {
+          id: "player-2-char-2",
+          name: "Borin",
+          side: "player",
+          currentHitPoints: 0,
+          maxHitPoints: 11,
+          damageDealt: 3,
+          isDefeated: true,
+        },
+        {
+          id: "monster-1-goblin_skirmisher",
+          name: "Goblin Skirmisher",
+          side: "monster",
+          currentHitPoints: 0,
+          maxHitPoints: 7,
+          damageDealt: 5,
+          isDefeated: true,
+        },
+      ],
+      xpPerSurvivor: 25,
+    }),
+    [{
+      characterId: "char-1",
+      userId: "user-1",
+      characterName: "Alyndra",
+      xpGranted: 25,
+    }],
   );
 });

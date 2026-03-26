@@ -359,7 +359,10 @@ Class balance must be re-evaluated for party PvE and should not assume duel bala
 Recommended v1 rule:
 
 - keep class kits shallow at first
-- expansion should happen through loot, minor progression, and curated feature upgrades
+- expansion should happen through loot, encounter XP, minor progression, and curated feature upgrades
+- award XP only for won encounters
+- award XP only to party members still standing at the end of that encounter
+- do not alter gold or loot payout rules when XP is granted
 
 Avoid full spellbook or feat complexity in crawler v1.
 
