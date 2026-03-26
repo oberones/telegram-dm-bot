@@ -609,14 +609,41 @@ function buildMatchSummary(
   result: MatchResolutionResult,
   reason: string,
 ) {
-  const eventLines = result.events.map((event) => event.summary);
+  const winner = result.finalStates.find((state) => state.slot === result.winnerParticipantSlot)!;
+  const loser = result.finalStates.find((state) => state.slot !== result.winnerParticipantSlot)!;
+  const eventLines = result.events.map((event) => `- ${event.summary}`);
 
   return [
+    "Arena Verdict",
+    "",
     `${challengerCharacter.name} vs ${targetCharacter.name}`,
     `Reason: ${reason}`,
     "",
+    `Winner: ${winner.name}`,
+    `Method: ${formatMatchEndReason(result.endReason)}`,
+    `Final HP: ${winner.name} ${winner.currentHp}/${winner.maxHp}, ${loser.name} ${loser.currentHp}/${loser.maxHp}`,
+    `Rounds: ${result.roundsCompleted}`,
+    "",
+    "Combat Log",
     ...eventLines,
+    "",
+    `${winner.name} stands victorious.`,
   ].join("\n");
+}
+
+function formatMatchEndReason(reason: MatchResolutionResult["endReason"]) {
+  switch (reason) {
+    case "knockout":
+      return "Knockout";
+    case "round_limit_hp_pct":
+      return "Round limit, higher HP percentage";
+    case "round_limit_damage":
+      return "Round limit, more damage dealt";
+    case "round_limit_hits":
+      return "Round limit, more successful hits";
+    case "sudden_death":
+      return "Sudden death tie-break";
+  }
 }
 
 function toPersistedEvent(
