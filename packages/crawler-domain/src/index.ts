@@ -215,6 +215,22 @@ function lootEffectData(template: LootTemplateSeed) {
         summary: template.effectSummary,
         maxHpBonus: 2,
       };
+    case "flash_powder":
+      return {
+        summary: template.effectSummary,
+        initiativeBonus: 3,
+      };
+    case "stoneskin_tonic":
+      return {
+        summary: template.effectSummary,
+        armorClassBonus: 2,
+      };
+    case "arcane_draught":
+      return {
+        summary: template.effectSummary,
+        attackBonus: 2,
+        applicableClasses: ["wizard", "cleric"],
+      };
     default:
       return {
         summary: template.effectSummary,
@@ -361,6 +377,7 @@ type RunEffectRecord = {
   key: string;
   label: string;
   summary: string;
+  applicableClasses?: string[];
   attackBonus?: number;
   armorClassBonus?: number;
   maxHpBonus?: number;
@@ -475,16 +492,39 @@ function chooseRoomEffect(
 }
 
 function consumableEffectForTemplateKey(templateKey: string): RunEffectRecord | null {
-  if (templateKey === "minor_healing_potion") {
-    return {
-      key: "minor_healing_potion",
-      label: "Mending Draught",
-      summary: "+3 max HP in the next encounter.",
-      maxHpBonus: 3,
-    };
+  switch (templateKey) {
+    case "minor_healing_potion":
+      return {
+        key: "minor_healing_potion",
+        label: "Mending Draught",
+        summary: "+3 max HP in the next encounter.",
+        maxHpBonus: 3,
+      };
+    case "flash_powder":
+      return {
+        key: "flash_powder",
+        label: "Flash Powder",
+        summary: "+3 initiative in the next encounter.",
+        initiativeBonus: 3,
+      };
+    case "stoneskin_tonic":
+      return {
+        key: "stoneskin_tonic",
+        label: "Stoneskin Tonic",
+        summary: "+2 AC in the next encounter.",
+        armorClassBonus: 2,
+      };
+    case "arcane_draught":
+      return {
+        key: "arcane_draught",
+        label: "Arcane Draught",
+        summary: "+2 attack for wizard or cleric actions in the next encounter.",
+        applicableClasses: ["wizard", "cleric"],
+        attackBonus: 2,
+      };
+    default:
+      return null;
   }
-
-  return null;
 }
 
 async function grantInventoryReward(params: {
@@ -545,12 +585,18 @@ function toPlayerEncounterParticipant(
     "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
   > = profileByClass[character.class_key] ?? defaultProfile;
   const equipmentEffect = extractEquipmentEffect(loadouts, character.class_key);
-  const runEffectTotals = runEffects.reduce<EquipmentEffect>((totals, effect) => ({
-    attackBonus: totals.attackBonus + (effect.attackBonus ?? 0),
-    armorClassBonus: totals.armorClassBonus + (effect.armorClassBonus ?? 0),
-    maxHpBonus: totals.maxHpBonus + (effect.maxHpBonus ?? 0),
-    initiativeBonus: totals.initiativeBonus + (effect.initiativeBonus ?? 0),
-  }), {
+  const runEffectTotals = runEffects.reduce<EquipmentEffect>((totals, effect) => {
+    if (effect.applicableClasses && !effect.applicableClasses.includes(character.class_key)) {
+      return totals;
+    }
+
+    return {
+      attackBonus: totals.attackBonus + (effect.attackBonus ?? 0),
+      armorClassBonus: totals.armorClassBonus + (effect.armorClassBonus ?? 0),
+      maxHpBonus: totals.maxHpBonus + (effect.maxHpBonus ?? 0),
+      initiativeBonus: totals.initiativeBonus + (effect.initiativeBonus ?? 0),
+    };
+  }, {
     attackBonus: 0,
     armorClassBonus: 0,
     maxHpBonus: 0,

@@ -160,6 +160,30 @@ export const starterLootTemplates: LootTemplateSeed[] = [
     isPermanent: false,
   },
   {
+    key: "flash_powder",
+    name: "Flash Powder",
+    category: "consumable",
+    rarity: "common",
+    effectSummary: "Gain a burst of initiative in the next encounter",
+    isPermanent: false,
+  },
+  {
+    key: "stoneskin_tonic",
+    name: "Stoneskin Tonic",
+    category: "consumable",
+    rarity: "uncommon",
+    effectSummary: "Harden defenses for the next encounter",
+    isPermanent: false,
+  },
+  {
+    key: "arcane_draught",
+    name: "Arcane Draught",
+    category: "consumable",
+    rarity: "uncommon",
+    effectSummary: "Sharpen spellcasting for the next encounter",
+    isPermanent: false,
+  },
+  {
     key: "gold",
     name: "Gold",
     category: "currency",
@@ -383,21 +407,23 @@ export function generateRoomRewards(
   const rng = createRng(seed);
   const rewards: RoomRewardSeed[] = [];
   const permanentPool = starterLootTemplates.filter((template) => template.isPermanent);
+  const consumablePool = starterLootTemplates.filter((template) => template.category === "consumable");
 
   for (let recipientSlot = 1; recipientSlot <= recipientCount; recipientSlot += 1) {
     if (roomType === "rest") {
       rewards.push({
         recipientSlot,
-        templateKey: "minor_healing_potion",
+        templateKey: rng() > 0.65 ? "stoneskin_tonic" : "minor_healing_potion",
         quantity: 1,
       });
       continue;
     }
 
     if (roomType === "event") {
+      const consumable = consumablePool[Math.floor(rng() * consumablePool.length)] ?? consumablePool[0];
       rewards.push({
         recipientSlot,
-        templateKey: rng() > 0.5 ? "gold" : "minor_healing_potion",
+        templateKey: rng() > 0.5 ? "gold" : (consumable?.key ?? "minor_healing_potion"),
         quantity: rng() > 0.5 ? 10 : 1,
       });
       continue;
