@@ -1,6 +1,6 @@
 {
   "name": "@dm-bot/engine",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@dm-bot/shared": "0.22.0"
+    "@dm-bot/shared": "0.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
