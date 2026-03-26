@@ -4,27 +4,29 @@ Dungeon Master Bot is a Telegram-first dispute arbitration system where users se
 
 Normal users interact through Telegram. Operators and moderators use a browser-based admin panel. The project is designed to run through Docker both locally and in production so workstation and server workflows stay aligned.
 
-Current repo version: `0.11.1`
+Current repo version: `0.24.0`
 
 ## Current Status
 
 - Beta hardening is in progress.
 - Alpha delivery, moderation, recovery, and backup/restore foundations are complete.
-- Core Telegram flows, combat resolution, dispute lifecycle, admin auth, moderation actions, and recovery tooling are implemented.
+- Core Telegram flows, combat resolution, dispute lifecycle, admin auth, moderation actions, recovery tooling, and a playable crawler prototype are implemented.
 
 ## Product Summary
 
 The current product supports:
 
-- Telegram character creation using fixed starter class templates
+- Telegram character creation with a dice-driven 5e-style creation flow
 - DM and group-chat bot flows
 - Dispute creation, acceptance, and decline
 - Automated match resolution with persisted event logs
 - Record and history views for users
 - Soft deletion of characters by retiring them
+- A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, and persistent loot
 - Read-only and operational admin views for users, characters, disputes, matches, recovery state, and audit logs
 - Admin moderation actions such as suspend/reactivate user and freeze/unfreeze character
 - Admin recovery actions such as cancel pending dispute and cancel/finalize flagged match
+- Read-only crawler admin views for parties, active runs, rewards, inventory, and loadouts
 
 ## Repository Layout
 
@@ -33,6 +35,9 @@ apps/
   admin/     React + Vite admin panel
   server/    Fastify API, Telegram ingress, admin API
 packages/
+  crawler-domain/   Crawler Telegram/domain flows
+  crawler-engine/   PvE encounter resolver
+  crawler-generation/ Procedural generation and reward selection
   db/        PostgreSQL access, migrations, repositories
   domain/    Telegram/domain flows and business logic
   engine/    Deterministic combat engine
@@ -46,6 +51,9 @@ infra/
 The system is a Docker-friendly modular monolith:
 
 - `apps/server`: Fastify server for health checks, Telegram webhook ingress or polling, and admin API routes
+- `packages/crawler-domain`: crawler party, run, reward, equipment, and consumable flows
+- `packages/crawler-engine`: deterministic party-vs-monster encounter engine
+- `packages/crawler-generation`: seeded dungeon, encounter, and reward generation
 - `packages/domain`: transport-agnostic domain logic for user flows, disputes, and summaries
 - `packages/engine`: deterministic 1v1 combat engine
 - `packages/db`: repository layer and SQL migrations for PostgreSQL
@@ -62,6 +70,14 @@ Supporting design documents:
 - [SCHEMA.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/SCHEMA.md)
 - [DEPLOYMENT.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/DEPLOYMENT.md)
 - [DOCKER_DEPLOYMENT.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/DOCKER_DEPLOYMENT.md)
+- [DUNGEON_CRAWLER_EXPANSION.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/DUNGEON_CRAWLER_EXPANSION.md)
+- [CRAWLER_RULES_SPEC.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_RULES_SPEC.md)
+- [CRAWLER_SCHEMA.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_SCHEMA.md)
+- [CRAWLER_BOT_FLOWS.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_BOT_FLOWS.md)
+- [CRAWLER_ARCHITECTURE.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_ARCHITECTURE.md)
+- [CRAWLER_ROADMAP.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_ROADMAP.md)
+- [CRAWLER_CONTENT_SPEC.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_CONTENT_SPEC.md)
+- [CRAWLER_IMPLEMENTATION_PLAN.md](/Users/oberon/Projects/coding/telegram-bots/dungeon-master-bot/CRAWLER_IMPLEMENTATION_PLAN.md)
 
 ## Prerequisites
 
@@ -185,6 +201,9 @@ make typecheck
 make build
 make test
 make test-engine
+make test-crawler-engine
+make test-crawler-generation
+make test-crawler-domain
 make test-db
 make test-shared
 make test-server
@@ -201,6 +220,11 @@ make docker-prod-config
 `make test` is the main validation command. It runs:
 
 - engine tests
+- crawler engine tests
+- crawler generation tests
+- crawler domain tests
+- shared config tests
+- database repository tests
 - server tests
 - workspace typecheck
 - workspace build
@@ -211,6 +235,7 @@ Current user-facing Telegram commands:
 
 - `/start`
 - `/help`
+- `/status`
 - `/create_character`
 - `/character`
 - `/delete_character`
@@ -220,15 +245,19 @@ Current user-facing Telegram commands:
 - `/accept`
 - `/decline`
 - `/cancel`
+- `/party`
+- `/inventory`
+- `/equipment`
 
 ### Group Support
 
 Current group behavior:
 
-- `/start`, `/help`, and `/dispute` work in groups
+- `/start`, `/help`, `/status`, `/dispute`, and `/party` work in groups
 - reply-based disputes are supported
 - mention-based disputes are supported
-- character creation and character management redirect users to DM
+- crawler party formation and run progression happen in groups
+- character creation, character management, crawler inventory, and crawler equipment redirect users to DM
 
 ### Dispute Targeting
 
@@ -237,6 +266,23 @@ Supported dispute targeting styles:
 - `/dispute @username reason`
 - reply to a user with `/dispute reason`
 - Telegram mention entities and text mentions
+
+### Crawler Mode
+
+Current crawler capabilities:
+
+- create and join parties in group chats
+- ready up and start seeded procedural runs
+- traverse combat, elite, boss, treasure, event, and rest rooms
+- auto-resolve PvE encounters against procedurally selected monsters
+- earn persistent loot, consumables, and cumulative gold
+- inspect and use `/inventory` in DM
+- inspect and manage `/equipment` in DM
+
+Current crawler gaps:
+
+- `/run` resume is planned but not implemented yet
+- crawler recovery tooling is still earlier than the duel-side recovery surface
 
 ## Admin Panel
 
@@ -249,6 +295,10 @@ The admin panel currently supports:
 - disputes list
 - matches list
 - match detail and event log views
+- parties list
+- active runs list
+- run reward ledger views
+- character crawler inventory and loadout detail
 - audit log view
 - recovery view for pending disputes and flagged matches
 - user suspension/reactivation
@@ -279,6 +329,10 @@ Current notable backend endpoints:
 - `GET /api/disputes`
 - `GET /api/matches`
 - `GET /api/matches/:id`
+- `GET /api/parties`
+- `GET /api/runs`
+- `GET /api/runs/:id/rewards`
+- `GET /api/characters/:id/crawler-loadout`
 - operational admin mutation routes for recovery and moderation
 
 ## Testing
@@ -286,6 +340,9 @@ Current notable backend endpoints:
 Current automated coverage includes:
 
 - combat engine tests
+- crawler generation tests
+- crawler encounter engine tests
+- crawler domain tests
 - Telegram update handling tests
 - Telegram webhook route tests
 - admin API route tests
@@ -308,6 +365,18 @@ Run engine tests only:
 
 ```bash
 npm run test:engine
+```
+
+Run crawler generation tests only:
+
+```bash
+npm run test:crawler-generation
+```
+
+Run crawler encounter tests only:
+
+```bash
+npm run test:crawler-engine
 ```
 
 ## Operations
@@ -341,6 +410,8 @@ This is still a Beta-hardening project. Review the deployment and runbook docs b
 ## Known Limitations
 
 - The combat ruleset is intentionally bounded and does not implement full 5e.
+- The crawler is playable, but it is still a prototype expansion rather than a hardened second product line.
+- `/run` resume and fuller crawler recovery tooling are not complete yet.
 - The server is a modular monolith, not a horizontally scaled distributed system.
 - Telegram delivery idempotency is now tracked at webhook ingress, but broader retry/reconciliation hardening is still part of Beta work.
 - The admin panel is operationally useful, but not yet a full-featured back-office product.
