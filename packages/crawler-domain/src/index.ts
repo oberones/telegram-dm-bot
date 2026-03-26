@@ -1238,7 +1238,7 @@ export function formatRunPartyRosterEntry(
 ) {
   const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
   const crawlerProgress = character
-    ? ` - crawler Lv${character.crawler_level} (${character.crawler_xp} XP)`
+    ? ` - crawler ${character.crawler_xp} XP`
     : "";
 
   return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}${crawlerProgress}`;

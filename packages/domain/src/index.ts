@@ -270,7 +270,7 @@ function formatCharacterSummary(character: CharacterRecord) {
     `Name: ${character.name}`,
     `Class: ${capitalize(character.class_key)}`,
     `Level: ${character.level}`,
-    `Crawler: Lv${character.crawler_level} (${character.crawler_xp} XP)`,
+    `Crawler XP: ${character.crawler_xp}`,
     `Status: ${capitalize(character.status)}`,
     `HP: ${derived.maxHp ?? "?"}`,
     `AC: ${derived.armorClass ?? "?"}`,

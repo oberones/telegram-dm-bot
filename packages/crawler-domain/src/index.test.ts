@@ -283,6 +283,6 @@ test("run party roster entry includes crawler progression when character data is
         crawler_stats: {},
       },
     ),
-    "1. Alyndra (fighter) - @alice - ready - crawler Lv2 (125 XP)",
+    "1. Alyndra (fighter) - @alice - ready - crawler 125 XP",
   );
 });

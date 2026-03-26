@@ -1193,7 +1193,7 @@ export function App() {
                         {capitalize(character.class_key)} Lv{character.level}
                       </td>
                       <td>
-                        Lv{character.crawler_level} • {character.crawler_xp} XP
+                        {character.crawler_xp} XP
                       </td>
                       <td>{capitalize(character.status)}</td>
                       <td>
@@ -1244,7 +1244,7 @@ export function App() {
                 <div className="list-row">
                   <strong>Progression</strong>
                   <p>
-                    Arena Lv{characterLoadout.character.level} | Crawler Lv{characterLoadout.character.crawler_level} | {characterLoadout.character.crawler_xp} XP
+                    Arena Lv{characterLoadout.character.level} | Crawler XP {characterLoadout.character.crawler_xp}
                   </p>
                 </div>
 
