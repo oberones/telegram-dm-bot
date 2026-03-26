@@ -1,3 +1,9 @@
+## 0.17.0 (2026-03-26)
+
+### Feat
+
+- add initial scaffolding for crawler expansion
+
 ## 0.16.1 (2026-03-25)
 
 ### Fix
