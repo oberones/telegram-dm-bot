@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "migrate": "node --conditions=source --import tsx src/migrate.ts",
-    "test": "node --conditions=source --import tsx --test src/**/*.test.ts",
+    "test": "find src -name '*.test.ts' -print0 | xargs -0 node --conditions=source --import tsx --test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

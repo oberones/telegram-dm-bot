@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test test-db test-shared test-engine test-server release-version release-check migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
+.PHONY: install typecheck build test test-db test-shared test-engine test-server test-crawler-domain test-crawler-engine test-crawler-generation release-version release-check migrate docker-local-up docker-local-down docker-local-build docker-prod-build docker-prod-config clean
 
 install:
 	npm install
@@ -11,6 +11,9 @@ build:
 
 test:
 	npm run test:engine
+	npm run test:crawler-engine
+	npm run test:crawler-generation
+	npm run test:crawler-domain
 	npm run test:db
 	npm run test:shared
 	npm run test:server
@@ -19,6 +22,15 @@ test:
 
 test-engine:
 	npm run test:engine
+
+test-crawler-domain:
+	npm run test:crawler-domain
+
+test-crawler-engine:
+	npm run test:crawler-engine
+
+test-crawler-generation:
+	npm run test:crawler-generation
 
 test-db:
 	npm run test:db
@@ -35,6 +47,9 @@ release-version:
 release-check:
 	npm run typecheck
 	npm run test:engine
+	npm run test:crawler-engine
+	npm run test:crawler-generation
+	npm run test:crawler-domain
 	npm run test:db
 	npm run test:shared
 	npm run test:server

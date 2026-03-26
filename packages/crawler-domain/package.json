@@ -1,5 +1,5 @@
 {
-  "name": "@dm-bot/shared",
+  "name": "@dm-bot/crawler-domain",
   "version": "0.16.1",
   "private": true,
   "type": "module",

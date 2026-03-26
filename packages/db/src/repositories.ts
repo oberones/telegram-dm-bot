@@ -244,6 +244,102 @@ export type AdminSessionRecord = {
   created_at: Date;
 };
 
+export type PartyRecord = {
+  id: string;
+  leader_user_id: string;
+  status: "forming" | "ready" | "in_run" | "completed" | "abandoned" | "cancelled";
+  active_run_id: string | null;
+  party_name: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type PartyMemberRecord = {
+  id: string;
+  party_id: string;
+  user_id: string;
+  character_id: string;
+  status: "joined" | "ready" | "left" | "disconnected" | "defeated";
+  joined_at: Date;
+  ready_at: Date | null;
+  left_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type AdventureRunRecord = {
+  id: string;
+  party_id: string;
+  status:
+    | "forming"
+    | "active"
+    | "awaiting_choice"
+    | "in_combat"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "abandoned"
+    | "cancelled"
+    | "error";
+  seed: string;
+  generation_version: string;
+  theme_key: string | null;
+  rules_version_id: string | null;
+  floor_count: number;
+  current_floor_number: number | null;
+  current_room_id: string | null;
+  active_encounter_id: string | null;
+  difficulty_tier: number;
+  summary: Record<string, unknown>;
+  started_at: Date | null;
+  completed_at: Date | null;
+  failed_at: Date | null;
+  failure_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type MonsterTemplateRecord = {
+  id: string;
+  template_key: string;
+  display_name: string;
+  theme_key: string;
+  role_key: string;
+  point_value: string;
+  stat_block: Record<string, unknown>;
+  ai_profile: Record<string, unknown>;
+  rewards: Record<string, unknown>;
+  is_active: boolean;
+  content_version: string;
+};
+
+export type LootTemplateRecord = {
+  id: string;
+  template_key: string;
+  display_name: string;
+  category_key: string;
+  rarity_key: string;
+  equipment_slot: "weapon" | "armor" | "accessory" | null;
+  is_permanent: boolean;
+  effect_data: Record<string, unknown>;
+  drop_rules: Record<string, unknown>;
+  is_active: boolean;
+  content_version: string;
+};
+
+export type InventoryItemRecord = {
+  id: string;
+  user_id: string;
+  character_id: string | null;
+  loot_template_id: string | null;
+  status: "owned" | "equipped" | "consumed" | "lost" | "destroyed";
+  quantity: number;
+  metadata: Record<string, unknown>;
+  acquired_at: Date;
+  consumed_at: Date | null;
+  lost_at: Date | null;
+};
+
 type TelegramUserInput = {
   telegramUserId: string;
   telegramUsername?: string | undefined;
@@ -262,6 +358,60 @@ type CharacterInput = {
   derivedStats: Record<string, unknown>;
   loadout: Record<string, unknown>;
   resourceState: Record<string, unknown>;
+};
+
+type PartyInput = {
+  leaderUserId: string;
+  partyName?: string | null;
+};
+
+type PartyMemberInput = {
+  partyId: string;
+  userId: string;
+  characterId: string;
+};
+
+type AdventureRunInput = {
+  partyId: string;
+  seed: string;
+  generationVersion: string;
+  floorCount: number;
+  difficultyTier: number;
+  themeKey?: string | null;
+  rulesVersionId?: string | null;
+  status?: AdventureRunRecord["status"];
+};
+
+type MonsterTemplateInput = {
+  templateKey: string;
+  displayName: string;
+  themeKey: string;
+  roleKey: string;
+  pointValue: number;
+  statBlock: Record<string, unknown>;
+  aiProfile?: Record<string, unknown>;
+  rewards?: Record<string, unknown>;
+  contentVersion: string;
+};
+
+type LootTemplateInput = {
+  templateKey: string;
+  displayName: string;
+  categoryKey: string;
+  rarityKey: string;
+  equipmentSlot?: LootTemplateRecord["equipment_slot"];
+  isPermanent: boolean;
+  effectData: Record<string, unknown>;
+  dropRules?: Record<string, unknown>;
+  contentVersion: string;
+};
+
+type InventoryItemInput = {
+  userId: string;
+  characterId?: string | null;
+  lootTemplateId?: string | null;
+  quantity?: number;
+  metadata?: Record<string, unknown>;
 };
 
 type CreateDisputeInput = {
@@ -1759,5 +1909,340 @@ export async function getDashboardCounts(): Promise<{
       runningMatches: Number(runningMatches.rows[0]?.count ?? 0),
       failedMatches: Number(failedMatches.rows[0]?.count ?? 0),
     };
+  });
+}
+
+export async function createParty(input: PartyInput): Promise<PartyRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyRecord>(
+      `
+        INSERT INTO parties (
+          leader_user_id,
+          party_name
+        )
+        VALUES ($1, $2)
+        RETURNING *
+      `,
+      [input.leaderUserId, input.partyName ?? null],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function getPartyById(partyId: string): Promise<PartyRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyRecord>(
+      `
+        SELECT *
+        FROM parties
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [partyId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function listActiveParties(): Promise<PartyRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyRecord>(
+      `
+        SELECT *
+        FROM parties
+        WHERE status IN ('forming', 'ready', 'in_run')
+        ORDER BY created_at DESC
+      `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function addPartyMember(input: PartyMemberInput): Promise<PartyMemberRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        INSERT INTO party_members (
+          party_id,
+          user_id,
+          character_id
+        )
+        VALUES ($1, $2, $3)
+        RETURNING *
+      `,
+      [input.partyId, input.userId, input.characterId],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listPartyMembers(partyId: string): Promise<PartyMemberRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        SELECT *
+        FROM party_members
+        WHERE party_id = $1
+        ORDER BY joined_at ASC
+      `,
+      [partyId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function setPartyMemberReadyState(
+  partyMemberId: string,
+  ready: boolean,
+): Promise<PartyMemberRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        UPDATE party_members
+        SET
+          status = $2,
+          ready_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [partyMemberId, ready ? "ready" : "joined", ready],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function createAdventureRun(input: AdventureRunInput): Promise<AdventureRunRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdventureRunRecord>(
+      `
+        INSERT INTO adventure_runs (
+          party_id,
+          status,
+          seed,
+          generation_version,
+          theme_key,
+          rules_version_id,
+          floor_count,
+          difficulty_tier
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+      `,
+      [
+        input.partyId,
+        input.status ?? "forming",
+        input.seed,
+        input.generationVersion,
+        input.themeKey ?? null,
+        input.rulesVersionId ?? null,
+        input.floorCount,
+        input.difficultyTier,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function getAdventureRunById(runId: string): Promise<AdventureRunRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdventureRunRecord>(
+      `
+        SELECT *
+        FROM adventure_runs
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [runId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function listActiveAdventureRuns(): Promise<AdventureRunRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdventureRunRecord>(
+      `
+        SELECT *
+        FROM adventure_runs
+        WHERE status IN ('forming', 'active', 'awaiting_choice', 'in_combat', 'paused')
+        ORDER BY created_at DESC
+      `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function upsertMonsterTemplate(input: MonsterTemplateInput): Promise<MonsterTemplateRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MonsterTemplateRecord>(
+      `
+        INSERT INTO monster_templates (
+          template_key,
+          display_name,
+          theme_key,
+          role_key,
+          point_value,
+          stat_block,
+          ai_profile,
+          rewards,
+          content_version
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (template_key) DO UPDATE
+        SET
+          display_name = EXCLUDED.display_name,
+          theme_key = EXCLUDED.theme_key,
+          role_key = EXCLUDED.role_key,
+          point_value = EXCLUDED.point_value,
+          stat_block = EXCLUDED.stat_block,
+          ai_profile = EXCLUDED.ai_profile,
+          rewards = EXCLUDED.rewards,
+          content_version = EXCLUDED.content_version,
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        input.templateKey,
+        input.displayName,
+        input.themeKey,
+        input.roleKey,
+        input.pointValue,
+        input.statBlock,
+        input.aiProfile ?? {},
+        input.rewards ?? {},
+        input.contentVersion,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listMonsterTemplates(): Promise<MonsterTemplateRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<MonsterTemplateRecord>(
+      `
+        SELECT *
+        FROM monster_templates
+        WHERE is_active = TRUE
+        ORDER BY theme_key ASC, template_key ASC
+      `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function upsertLootTemplate(input: LootTemplateInput): Promise<LootTemplateRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<LootTemplateRecord>(
+      `
+        INSERT INTO loot_templates (
+          template_key,
+          display_name,
+          category_key,
+          rarity_key,
+          equipment_slot,
+          is_permanent,
+          effect_data,
+          drop_rules,
+          content_version
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (template_key) DO UPDATE
+        SET
+          display_name = EXCLUDED.display_name,
+          category_key = EXCLUDED.category_key,
+          rarity_key = EXCLUDED.rarity_key,
+          equipment_slot = EXCLUDED.equipment_slot,
+          is_permanent = EXCLUDED.is_permanent,
+          effect_data = EXCLUDED.effect_data,
+          drop_rules = EXCLUDED.drop_rules,
+          content_version = EXCLUDED.content_version,
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        input.templateKey,
+        input.displayName,
+        input.categoryKey,
+        input.rarityKey,
+        input.equipmentSlot ?? null,
+        input.isPermanent,
+        input.effectData,
+        input.dropRules ?? {},
+        input.contentVersion,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listLootTemplates(): Promise<LootTemplateRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<LootTemplateRecord>(
+      `
+        SELECT *
+        FROM loot_templates
+        WHERE is_active = TRUE
+        ORDER BY category_key ASC, rarity_key ASC, template_key ASC
+      `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function createInventoryItem(input: InventoryItemInput): Promise<InventoryItemRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<InventoryItemRecord>(
+      `
+        INSERT INTO inventory_items (
+          user_id,
+          character_id,
+          loot_template_id,
+          quantity,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `,
+      [
+        input.userId,
+        input.characterId ?? null,
+        input.lootTemplateId ?? null,
+        input.quantity ?? 1,
+        input.metadata ?? {},
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listInventoryItemsForCharacter(characterId: string): Promise<InventoryItemRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<InventoryItemRecord>(
+      `
+        SELECT *
+        FROM inventory_items
+        WHERE character_id = $1
+        ORDER BY acquired_at DESC
+      `,
+      [characterId],
+    );
+
+    return result.rows;
   });
 }
