@@ -246,6 +246,7 @@ Current user-facing Telegram commands:
 - `/decline`
 - `/cancel`
 - `/party`
+- `/run`
 - `/inventory`
 - `/equipment`
 
@@ -254,10 +255,11 @@ Current user-facing Telegram commands:
 Current group behavior:
 
 - `/start`, `/help`, `/status`, `/dispute`, and `/party` work in groups
+- `/run` works in both groups and DM for crawler recovery/status
 - reply-based disputes are supported
 - mention-based disputes are supported
 - crawler party formation and run progression happen in groups
-- character creation, character management, crawler inventory, and crawler equipment redirect users to DM
+- character creation, character management, crawler inventory, crawler equipment, and personal crawler recovery details are available in DM
 
 ### Dispute Targeting
 
@@ -276,12 +278,12 @@ Current crawler capabilities:
 - traverse combat, elite, boss, treasure, event, and rest rooms
 - auto-resolve PvE encounters against procedurally selected monsters
 - earn persistent loot, consumables, and cumulative gold
+- inspect or resume the current crawler run with `/run`
 - inspect and use `/inventory` in DM
 - inspect and manage `/equipment` in DM
 
 Current crawler gaps:
 
-- `/run` resume is planned but not implemented yet
 - crawler recovery tooling is still earlier than the duel-side recovery surface
 
 ## Admin Panel
@@ -411,7 +413,7 @@ This is still a Beta-hardening project. Review the deployment and runbook docs b
 
 - The combat ruleset is intentionally bounded and does not implement full 5e.
 - The crawler is playable, but it is still a prototype expansion rather than a hardened second product line.
-- `/run` resume and fuller crawler recovery tooling are not complete yet.
+- `/run` recovery is conservative today and fuller crawler recovery tooling is not complete yet.
 - The server is a modular monolith, not a horizontally scaled distributed system.
 - Telegram delivery idempotency is now tracked at webhook ingress, but broader retry/reconciliation hardening is still part of Beta work.
 - The admin panel is operationally useful, but not yet a full-featured back-office product.

@@ -2478,6 +2478,28 @@ export async function getAdventureRunById(runId: string): Promise<AdventureRunRe
   });
 }
 
+export async function getLatestAdventureRunForUser(userId: string): Promise<AdventureRunRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdventureRunRecord>(
+      `
+        SELECT DISTINCT ar.*
+        FROM adventure_runs ar
+        INNER JOIN parties p
+          ON p.id = ar.party_id
+        LEFT JOIN party_members pm
+          ON pm.party_id = p.id
+        WHERE p.leader_user_id = $1
+          OR pm.user_id = $1
+        ORDER BY ar.created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function listActiveAdventureRuns(): Promise<AdventureRunRecord[]> {
   return withTransaction(async (client) => {
     const result = await client.query<AdventureRunRecord>(

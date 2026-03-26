@@ -20,6 +20,7 @@ import {
   getCharacterById,
   getEligibleCharacterByUserId,
   getInventoryItemById,
+  getLatestAdventureRunForUser,
   getPartyById,
   getPartyMemberByPartyAndUser,
   getRunRoomDetailById,
@@ -95,6 +96,8 @@ export type TelegramActor = {
   telegramFirstName?: string | undefined;
   telegramLastName?: string | undefined;
 };
+
+export type CrawlerRunSurface = "group" | "dm";
 
 export type CrawlerPartyEligibility = {
   userStatus: "active" | "suspended";
@@ -822,6 +825,8 @@ function formatActiveRoomPrompt(
   run: AdventureRunRecord,
   room: RunRoomDetailRecord,
   memberCount: number,
+  members: PartyMemberDetailRecord[],
+  surface: CrawlerRunSurface,
 ) {
   const prompt = room.prompt_payload as {
     title?: string;
@@ -830,12 +835,27 @@ function formatActiveRoomPrompt(
     templateKey?: string;
   };
 
+  const presentation = describeRunPresentationState({
+    runStatus: run.status,
+    roomStatus: room.status,
+    roomResolvedAt: room.resolved_at,
+    surface,
+    hasCurrentRoom: true,
+  });
+
   const lines = [
-    "Crawler Run",
+    presentation.heading,
     "",
     `Run ID: ${run.id}`,
     `Theme: ${run.theme_key ?? "unknown"}`,
+    `Run status: ${run.status.replaceAll("_", " ")}`,
+    `Current room: Floor ${room.floor_number}, Room ${room.room_number}`,
     `Party size: ${memberCount}`,
+    "",
+    "Party",
+    ...formatPartyRoster(members),
+    "",
+    presentation.actionLine,
     "",
     prompt.title ?? `Floor ${room.floor_number}, Room ${room.room_number}`,
     prompt.description ?? "A new chamber lies ahead.",
@@ -851,12 +871,16 @@ function formatActiveRoomPrompt(
 
   return {
     text: lines.join("\n"),
-    replyMarkup: {
-      inline_keyboard: [[{
-        text: roomActionLabel(room.room_type),
-        callback_data: `crawler:run:proceed:${room.id}`,
-      }]],
-    },
+    ...(presentation.buttonAllowed
+      ? {
+        replyMarkup: {
+          inline_keyboard: [[{
+            text: roomActionLabel(room.room_type),
+            callback_data: `crawler:run:proceed:${room.id}`,
+          }]],
+        },
+      }
+      : {}),
   } satisfies CrawlerOutboundMessage;
 }
 
@@ -888,6 +912,80 @@ function formatRunFailedMessage(run: AdventureRunRecord, room: RunRoomDetailReco
       run.failure_reason ?? "The expedition has ended in defeat.",
     ].join("\n"),
   } satisfies CrawlerOutboundMessage;
+}
+
+type RunPresentationState = {
+  heading: string;
+  actionLine: string;
+  actionable: boolean;
+  buttonAllowed: boolean;
+  showRoomPrompt: boolean;
+};
+
+export function describeRunPresentationState(params: {
+  runStatus: AdventureRunRecord["status"];
+  roomStatus: RunRoomDetailRecord["status"] | null;
+  roomResolvedAt: Date | null;
+  surface: CrawlerRunSurface;
+  hasCurrentRoom: boolean;
+}): RunPresentationState {
+  if (params.runStatus === "completed") {
+    return {
+      heading: "Crawler Run Complete",
+      actionLine: "This run is finished and cannot be resumed.",
+      actionable: false,
+      buttonAllowed: false,
+      showRoomPrompt: false,
+    };
+  }
+
+  if (params.runStatus === "failed") {
+    return {
+      heading: "Crawler Run Failed",
+      actionLine: "This run has already ended in defeat and cannot be resumed.",
+      actionable: false,
+      buttonAllowed: false,
+      showRoomPrompt: false,
+    };
+  }
+
+  if (
+    params.runStatus === "awaiting_choice" &&
+    params.hasCurrentRoom &&
+    params.roomStatus === "active" &&
+    params.roomResolvedAt === null
+  ) {
+    return {
+      heading: "Crawler Run",
+      actionLine: params.surface === "group"
+        ? "Action: awaiting room input from the party."
+        : "Action: awaiting room input. Open the group chat with the bot to continue this room.",
+      actionable: true,
+      buttonAllowed: params.surface === "group",
+      showRoomPrompt: true,
+    };
+  }
+
+  return {
+    heading: "Crawler Run",
+    actionLine: "This run is not awaiting room input right now. No room action is available from /run.",
+    actionable: false,
+    buttonAllowed: false,
+    showRoomPrompt: false,
+  };
+}
+
+function formatPartyRoster(members: PartyMemberDetailRecord[]) {
+  const currentMembers = activeMembers(members);
+
+  if (currentMembers.length === 0) {
+    return ["No active party members found."];
+  }
+
+  return currentMembers.map((member, index) => {
+    const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
+    return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}`;
+  });
 }
 
 function formatInventoryMessage(
@@ -1009,7 +1107,7 @@ async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string):
   return formatPartyLobby(party, members, viewerUserId, leader?.display_name ?? "Unknown leader");
 }
 
-async function buildRunMessage(runId: string): Promise<CrawlerOutboundMessage> {
+async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "group"): Promise<CrawlerOutboundMessage> {
   const run = await getAdventureRunById(runId);
 
   if (!run) {
@@ -1031,20 +1129,78 @@ async function buildRunMessage(runId: string): Promise<CrawlerOutboundMessage> {
         "Crawler Run",
         "",
         `Run ID: ${run.id}`,
+        `Run status: ${run.status.replaceAll("_", " ")}`,
         "No active room is currently available.",
       ].join("\n"),
     };
   }
 
   if (run.status === "completed") {
-    return formatRunCompleteMessage(run, currentRoom, memberCount);
+    return {
+      text: [
+        formatRunCompleteMessage(run, currentRoom, memberCount).text,
+        "",
+        "Party",
+        ...formatPartyRoster(members),
+        "",
+        describeRunPresentationState({
+          runStatus: run.status,
+          roomStatus: currentRoom.status,
+          roomResolvedAt: currentRoom.resolved_at,
+          surface,
+          hasCurrentRoom: true,
+        }).actionLine,
+      ].join("\n"),
+    };
   }
 
   if (run.status === "failed") {
-    return formatRunFailedMessage(run, currentRoom, memberCount);
+    return {
+      text: [
+        formatRunFailedMessage(run, currentRoom, memberCount).text,
+        "",
+        "Party",
+        ...formatPartyRoster(members),
+        "",
+        describeRunPresentationState({
+          runStatus: run.status,
+          roomStatus: currentRoom.status,
+          roomResolvedAt: currentRoom.resolved_at,
+          surface,
+          hasCurrentRoom: true,
+        }).actionLine,
+      ].join("\n"),
+    };
   }
 
-  return formatActiveRoomPrompt(run, currentRoom, memberCount);
+  const presentation = describeRunPresentationState({
+    runStatus: run.status,
+    roomStatus: currentRoom.status,
+    roomResolvedAt: currentRoom.resolved_at,
+    surface,
+    hasCurrentRoom: true,
+  });
+
+  if (presentation.showRoomPrompt) {
+    return formatActiveRoomPrompt(run, currentRoom, memberCount, members, surface);
+  }
+
+  return {
+    text: [
+      presentation.heading,
+      "",
+      `Run ID: ${run.id}`,
+      `Theme: ${run.theme_key ?? "unknown"}`,
+      `Run status: ${run.status.replaceAll("_", " ")}`,
+      `Current room: Floor ${currentRoom.floor_number}, Room ${currentRoom.room_number}`,
+      `Party size: ${memberCount}`,
+      "",
+      "Party",
+      ...formatPartyRoster(members),
+      "",
+      presentation.actionLine,
+    ].join("\n"),
+  };
 }
 
 async function persistGeneratedRun(runId: string, generated: GeneratedRun) {
@@ -1414,7 +1570,7 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
 
   if (existingParty) {
     if (existingParty.status === "in_run" && existingParty.active_run_id) {
-      return buildRunMessage(existingParty.active_run_id);
+      return buildRunMessage(existingParty.active_run_id, "group");
     }
 
     return buildPartyLobbyMessage(existingParty, user.id);
@@ -1441,6 +1597,58 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
       "Create a party to begin assembling an adventure group.",
     ].join("\n"),
     replyMarkup: createPartyButtons(),
+  };
+}
+
+export async function handleRunCommand(
+  actor: TelegramActor,
+  surface: CrawlerRunSurface = "dm",
+): Promise<CrawlerOutboundMessage> {
+  const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
+  const activeParty = await getActivePartyForUser(user.id);
+
+  if (activeParty?.status === "in_run" && activeParty.active_run_id) {
+    return buildRunMessage(activeParty.active_run_id, surface);
+  }
+
+  if (activeParty) {
+    return {
+      text: [
+        "No active crawler run is currently underway for you.",
+        "",
+        "Your party is still in the lobby.",
+        "Use /party in the group chat to review members, readiness, and start the next run.",
+      ].join("\n"),
+    };
+  }
+
+  const latestRun = await getLatestAdventureRunForUser(user.id);
+
+  if (latestRun) {
+    const message = await buildRunMessage(latestRun.id, surface);
+    return {
+      text: [
+        "Most Recent Crawler Run",
+        "",
+        message.text,
+      ].join("\n"),
+      ...(message.replyMarkup ? { replyMarkup: message.replyMarkup } : {}),
+    };
+  }
+
+  return {
+    text: [
+      "No crawler run found for you yet.",
+      "",
+      "Use /party in a group chat to assemble a party and start an expedition.",
+    ].join("\n"),
   };
 }
 
@@ -1744,7 +1952,7 @@ export async function handleCrawlerCallback(
       return {
         alertText: "You are already in an active party",
         message: existingParty.status === "in_run" && existingParty.active_run_id
-          ? await buildRunMessage(existingParty.active_run_id)
+          ? await buildRunMessage(existingParty.active_run_id, "group")
           : await buildPartyLobbyMessage(existingParty, user.id),
       };
     }
@@ -1804,7 +2012,7 @@ export async function handleCrawlerCallback(
       return {
         alertText: "Leave your current party first",
         message: existingParty.status === "in_run" && existingParty.active_run_id
-          ? await buildRunMessage(existingParty.active_run_id)
+          ? await buildRunMessage(existingParty.active_run_id, "group")
           : await buildPartyLobbyMessage(existingParty, user.id),
       };
     }
@@ -1941,7 +2149,7 @@ export async function handleCrawlerCallback(
     if (party.status === "in_run" && party.active_run_id) {
       return {
         alertText: "Run already started",
-        message: await buildRunMessage(party.active_run_id),
+        message: await buildRunMessage(party.active_run_id, "group"),
       };
     }
 
@@ -2003,7 +2211,7 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: "Run started",
-      message: await buildRunMessage(run.id),
+      message: await buildRunMessage(run.id, "group"),
     };
   }
 

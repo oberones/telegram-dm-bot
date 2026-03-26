@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { handleCrawlerCallback, handleEquipmentCommand, handleInventoryCommand, handlePartyCommand } from "@dm-bot/crawler-domain";
+import { handleCrawlerCallback, handleEquipmentCommand, handleInventoryCommand, handlePartyCommand, handleRunCommand } from "@dm-bot/crawler-domain";
 
 import {
   handleCallback,
@@ -43,6 +43,7 @@ type TelegramUpdateDeps = {
   handleReplyDisputeCommand: typeof handleReplyDisputeCommand;
   handleTextMessage: typeof handleTextMessage;
   handlePartyCommand: typeof handlePartyCommand;
+  handleRunCommand: typeof handleRunCommand;
   handleInventoryCommand: typeof handleInventoryCommand;
   handleEquipmentCommand: typeof handleEquipmentCommand;
   handleCrawlerCallback: typeof handleCrawlerCallback;
@@ -67,6 +68,7 @@ const defaultDeps: TelegramUpdateDeps = {
   handleReplyDisputeCommand,
   handleTextMessage,
   handlePartyCommand,
+  handleRunCommand,
   handleInventoryCommand,
   handleEquipmentCommand,
   handleCrawlerCallback,
@@ -162,6 +164,11 @@ export async function processTelegramUpdate(
     }
 
     await app.telegram.sendMessage(chatId, await deps.handlePartyCommand(actor));
+    return;
+  }
+
+  if (normalizedCommand === "/run") {
+    await app.telegram.sendMessage(chatId, await deps.handleRunCommand(actor, isPrivateChat ? "dm" : "group"));
     return;
   }
 

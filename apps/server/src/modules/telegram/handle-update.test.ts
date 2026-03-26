@@ -70,6 +70,7 @@ function buildDeps() {
     handleReplyDisputeCommand: async () => ({ message: { text: "reply dispute" } }),
     handleTextMessage: async () => null,
     handlePartyCommand: async () => ({ text: "party lobby" }),
+    handleRunCommand: async (_actor: unknown, surface: "group" | "dm" = "dm") => ({ text: `run ${surface}` }),
     handleInventoryCommand: async () => ({ text: "inventory" }),
     handleEquipmentCommand: async () => ({ text: "equipment" }),
     handleCrawlerCallback: async () => ({ alertText: "party ok", message: { text: "party callback" } }),
@@ -154,6 +155,46 @@ test("processTelegramUpdate handles /party in group chats", async () => {
   );
 
   assert.deepEqual(sentMessages, [{ chatId: -100, text: "party lobby" }]);
+});
+
+test("processTelegramUpdate handles /run in group chats", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 111,
+      message: {
+        message_id: 1,
+        text: "/run",
+        chat: { id: -100, type: "group" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "run group" }]);
+});
+
+test("processTelegramUpdate handles /run in DM", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 112,
+      message: {
+        message_id: 1,
+        text: "/run",
+        chat: { id: 100, type: "private" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(sentMessages, [{ chatId: 100, text: "run dm" }]);
 });
 
 test("processTelegramUpdate handles /inventory in DM", async () => {
