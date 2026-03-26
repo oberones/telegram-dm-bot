@@ -1,3 +1,16 @@
+## 0.24.0 (2026-03-26)
+
+### Feat
+
+- expand consumables
+- add support for inventory consumables
+- add better distinction between rest and event rooms
+
+### Fix
+
+- scale monsters to number of players in the party
+- make gold units stack
+
 ## 0.23.0 (2026-03-26)
 
 ### Feat
