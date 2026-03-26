@@ -1,3 +1,10 @@
+## 0.27.0 (2026-03-26)
+
+### Feat
+
+- increase xp visibility
+- add encounter-based xp and leveling
+
 ## 0.26.0 (2026-03-26)
 
 ### Feat
