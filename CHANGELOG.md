@@ -1,3 +1,18 @@
+## 0.26.0 (2026-03-26)
+
+### Feat
+
+- improved admin recovery options
+- add support for admin recovery of stuck runs
+
+### Fix
+
+- address bug causing everyone to see the same party card
+
+### Refactor
+
+- make combat turn-based with the ability to retreat
+
 ## 0.25.0 (2026-03-26)
 
 ### Feat
