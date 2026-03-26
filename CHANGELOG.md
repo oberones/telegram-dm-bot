@@ -1,3 +1,9 @@
+## 0.14.0 (2026-03-25)
+
+### Feat
+
+- enhanced character creation
+
 ## 0.13.0 (2026-03-25)
 
 ### Feat
