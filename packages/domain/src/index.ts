@@ -611,7 +611,7 @@ function buildMatchSummary(
 ) {
   const winner = result.finalStates.find((state) => state.slot === result.winnerParticipantSlot)!;
   const loser = result.finalStates.find((state) => state.slot !== result.winnerParticipantSlot)!;
-  const eventLines = result.events.map((event) => `- ${event.summary}`);
+  const eventLines = formatCombatLog(result.events);
 
   return [
     "Arena Verdict",
@@ -629,6 +629,48 @@ function buildMatchSummary(
     "",
     `${winner.name} stands victorious.`,
   ].join("\n");
+}
+
+function formatCombatLog(events: CombatEvent[]) {
+  const lines: string[] = [];
+
+  for (const event of events) {
+    switch (event.type) {
+      case "initiative":
+        lines.push(`- ${event.summary}`);
+        break;
+      case "turn_start":
+        lines.push("");
+        lines.push(`Round ${event.round}`);
+        lines.push(`${"-".repeat(`Round ${event.round}`.length)}`);
+        lines.push(`- ${event.summary.replace(/^Round \d+:\s*/, "")}`);
+        break;
+      case "action":
+        lines.push(`- ${event.summary}`);
+        break;
+      case "attack":
+        lines.push(`${event.isCritical ? "*Critical hit* " : "- "}${event.summary}`);
+        break;
+      case "save":
+        lines.push(`- ${event.summary}`);
+        break;
+      case "damage":
+        lines.push(`${event.targetHpAfter === 0 ? "*Finishing blow* " : "- "}${event.summary}`);
+        break;
+      case "heal":
+        lines.push(`- ${event.summary}`);
+        break;
+      case "effect":
+        lines.push(`*Effect* ${event.summary}`);
+        break;
+      case "match_end":
+        lines.push("");
+        lines.push(`Verdict: ${event.summary}`);
+        break;
+    }
+  }
+
+  return lines;
 }
 
 function formatMatchEndReason(reason: MatchResolutionResult["endReason"]) {
