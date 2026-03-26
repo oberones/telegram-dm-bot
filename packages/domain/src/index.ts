@@ -515,13 +515,14 @@ function helpText() {
     "/record",
     "/history",
     "/status",
+    "/party",
     "/dispute @username reason",
     "/accept",
     "/decline",
     "/cancel",
     "",
     "Group chats:",
-    "- /start, /help, /status, and /dispute work in groups",
+    "- /start, /help, /status, /party, and /dispute work in groups",
     "- character creation and sheet management should be done in DM",
   ].join("\n");
 }

@@ -60,6 +60,37 @@ type CharacterSummary = {
   last_match_at: string | null;
 };
 
+type PartyMemberSummary = {
+  id: string;
+  user_display_name: string;
+  telegram_username: string | null;
+  character_name: string;
+  class_key: string;
+  status: string;
+};
+
+type PartySummary = {
+  id: string;
+  leader_display_name: string;
+  status: string;
+  party_name: string | null;
+  active_run_id: string | null;
+  created_at: string;
+  members: PartyMemberSummary[];
+};
+
+type RunSummary = {
+  id: string;
+  party_id: string;
+  status: string;
+  seed: string;
+  generation_version: string;
+  theme_key: string | null;
+  floor_count: number;
+  difficulty_tier: number;
+  started_at: string | null;
+};
+
 type MatchSummary = {
   id: string;
   dispute_id: string;
@@ -118,14 +149,17 @@ type AdminData = {
   disputes: DisputeSummary[];
   users: UserSummary[];
   characters: CharacterSummary[];
+  parties: PartySummary[];
+  runs: RunSummary[];
   matches: MatchSummary[];
   auditLogs: AuditLog[];
 };
 
-type ViewKey = "dashboard" | "disputes" | "matches" | "users" | "characters" | "audit" | "recovery";
+type ViewKey = "dashboard" | "parties" | "disputes" | "matches" | "users" | "characters" | "audit" | "recovery";
 
 const navItems: Array<{ key: ViewKey; label: string }> = [
   { key: "dashboard", label: "Dashboard" },
+  { key: "parties", label: "Parties" },
   { key: "disputes", label: "Disputes" },
   { key: "matches", label: "Matches" },
   { key: "users", label: "Users" },
@@ -184,6 +218,8 @@ function emptyAdminData(): AdminData {
     disputes: [],
     users: [],
     characters: [],
+    parties: [],
+    runs: [],
     matches: [],
     auditLogs: [],
   };
@@ -211,12 +247,14 @@ export function App() {
     setError(null);
 
     try {
-      const [dashboard, disputes, matches, users, characters, auditLogs] = await Promise.all([
+      const [dashboard, disputes, matches, users, characters, parties, runs, auditLogs] = await Promise.all([
         fetchJson<DashboardResponse>("/api/dashboard"),
         fetchJson<{ disputes: DisputeSummary[] }>("/api/disputes"),
         fetchJson<{ matches: MatchSummary[] }>("/api/matches"),
         fetchJson<{ users: UserSummary[] }>("/api/users"),
         fetchJson<{ characters: CharacterSummary[] }>("/api/characters"),
+        fetchJson<{ parties: PartySummary[] }>("/api/parties"),
+        fetchJson<{ runs: RunSummary[] }>("/api/runs"),
         fetchJson<{ auditLogs: AuditLog[] }>("/api/audit-logs"),
       ]);
 
@@ -226,6 +264,8 @@ export function App() {
         matches: matches.matches,
         users: users.users,
         characters: characters.characters,
+        parties: parties.parties,
+        runs: runs.runs,
         auditLogs: auditLogs.auditLogs,
       });
       setSelectedMatchId((current) => current ?? matches.matches[0]?.id ?? null);
@@ -568,6 +608,22 @@ export function App() {
 
           <article className="panel">
             <header className="panel-header">
+              <h2>Active parties</h2>
+              <span>{data.parties.length}</span>
+            </header>
+            <div className="stack-list">
+              {data.parties.slice(0, 6).map((party) => (
+                <div className="list-row" key={party.id}>
+                  <strong>{party.party_name ?? `${party.leader_display_name}'s party`}</strong>
+                  <span>{capitalize(party.status)}</span>
+                  <p>{party.members.length} members | Active run: {party.active_run_id ?? "none"}</p>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
               <h2>Recent matches</h2>
               <span>{data.matches.length}</span>
             </header>
@@ -619,6 +675,51 @@ export function App() {
               </tbody>
             </table>
           </div>
+        </section>
+      ) : null}
+
+      {!isLoading && view === "parties" ? (
+        <section className="dashboard-grid">
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Active parties</h2>
+              <span>{data.parties.length}</span>
+            </header>
+            <div className="stack-list">
+              {data.parties.map((party) => (
+                <div className="list-row" key={party.id}>
+                  <strong>{party.party_name ?? `${party.leader_display_name}'s party`}</strong>
+                  <span>{capitalize(party.status)}</span>
+                  <p>Leader: {party.leader_display_name}</p>
+                  <p>Run: {party.active_run_id ?? "Not started"}</p>
+                  <p>
+                    Members:{" "}
+                    {party.members.map((member) => {
+                      const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
+                      return `${member.character_name} (${member.class_key}, ${member.status}, ${handle})`;
+                    }).join(" | ")}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Active runs</h2>
+              <span>{data.runs.length}</span>
+            </header>
+            <div className="stack-list">
+              {data.runs.map((run) => (
+                <div className="list-row" key={run.id}>
+                  <strong>{run.id}</strong>
+                  <span>{capitalize(run.status)}</span>
+                  <p>Party: {run.party_id}</p>
+                  <p>Theme: {run.theme_key ?? "unknown"} | Floors: {run.floor_count} | Tier: {run.difficulty_tier}</p>
+                </div>
+              ))}
+            </div>
+          </article>
         </section>
       ) : null}
 

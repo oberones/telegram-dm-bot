@@ -69,6 +69,8 @@ function buildDeps() {
     handleParsedDisputeCommand: async () => ({ message: { text: "parsed dispute" } }),
     handleReplyDisputeCommand: async () => ({ message: { text: "reply dispute" } }),
     handleTextMessage: async () => null,
+    handlePartyCommand: async () => ({ text: "party lobby" }),
+    handlePartyCallback: async () => ({ alertText: "party ok", message: { text: "party callback" } }),
   };
 }
 
@@ -130,6 +132,51 @@ test("processTelegramUpdate handles /status in group chats", async () => {
   );
 
   assert.deepEqual(sentMessages, [{ chatId: -100, text: "status" }]);
+});
+
+test("processTelegramUpdate handles /party in group chats", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 11,
+      message: {
+        message_id: 1,
+        text: "/party",
+        chat: { id: -100, type: "group" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "party lobby" }]);
+});
+
+test("processTelegramUpdate routes crawler party callbacks before generic callbacks", async () => {
+  const { app, sentMessages, answeredCallbacks } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 12,
+      callback_query: {
+        id: "crawler-party-callback",
+        data: "crawler:party:create",
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+        message: {
+          message_id: 1,
+          text: "Party?",
+          chat: { id: -100, type: "group" },
+        },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(answeredCallbacks, [{ id: "crawler-party-callback", text: "party ok" }]);
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "party callback" }]);
 });
 
 test("processTelegramUpdate routes reply-based disputes", async () => {

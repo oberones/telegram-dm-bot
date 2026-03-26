@@ -267,6 +267,17 @@ export type PartyMemberRecord = {
   updated_at: Date;
 };
 
+export type PartySummaryRecord = PartyRecord & {
+  leader_display_name: string;
+};
+
+export type PartyMemberDetailRecord = PartyMemberRecord & {
+  user_display_name: string;
+  telegram_username: string | null;
+  character_name: string;
+  class_key: string;
+};
+
 export type AdventureRunRecord = {
   id: string;
   party_id: string;
@@ -1961,6 +1972,51 @@ export async function listActiveParties(): Promise<PartyRecord[]> {
   });
 }
 
+export async function listPartySummaries(): Promise<PartySummaryRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartySummaryRecord>(
+      `
+        SELECT
+          p.*,
+          leader.display_name AS leader_display_name
+        FROM parties p
+        INNER JOIN users leader
+          ON leader.id = p.leader_user_id
+        WHERE p.status IN ('forming', 'ready', 'in_run')
+        ORDER BY p.created_at DESC
+      `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getActivePartyForUser(userId: string): Promise<PartyRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyRecord>(
+      `
+        SELECT DISTINCT p.*
+        FROM parties p
+        LEFT JOIN party_members pm
+          ON pm.party_id = p.id
+        WHERE p.status IN ('forming', 'ready', 'in_run')
+          AND (
+            p.leader_user_id = $1
+            OR (
+              pm.user_id = $1
+              AND pm.status IN ('joined', 'ready')
+            )
+          )
+        ORDER BY p.created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function addPartyMember(input: PartyMemberInput): Promise<PartyMemberRecord> {
   return withTransaction(async (client) => {
     const result = await client.query<PartyMemberRecord>(
@@ -1996,6 +2052,51 @@ export async function listPartyMembers(partyId: string): Promise<PartyMemberReco
   });
 }
 
+export async function listPartyMemberDetails(partyId: string): Promise<PartyMemberDetailRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberDetailRecord>(
+      `
+        SELECT
+          pm.*,
+          u.display_name AS user_display_name,
+          u.telegram_username,
+          c.name AS character_name,
+          c.class_key
+        FROM party_members pm
+        INNER JOIN users u
+          ON u.id = pm.user_id
+        INNER JOIN characters c
+          ON c.id = pm.character_id
+        WHERE pm.party_id = $1
+        ORDER BY pm.joined_at ASC
+      `,
+      [partyId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getPartyMemberByPartyAndUser(
+  partyId: string,
+  userId: string,
+): Promise<PartyMemberRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        SELECT *
+        FROM party_members
+        WHERE party_id = $1
+          AND user_id = $2
+        LIMIT 1
+      `,
+      [partyId, userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function setPartyMemberReadyState(
   partyMemberId: string,
   ready: boolean,
@@ -2012,6 +2113,85 @@ export async function setPartyMemberReadyState(
         RETURNING *
       `,
       [partyMemberId, ready ? "ready" : "joined", ready],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function setPartyMemberLeft(partyMemberId: string): Promise<PartyMemberRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        UPDATE party_members
+        SET
+          status = 'left',
+          left_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [partyMemberId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function setPartyMemberStatus(params: {
+  partyMemberId: string;
+  status: PartyMemberRecord["status"];
+}): Promise<PartyMemberRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyMemberRecord>(
+      `
+        UPDATE party_members
+        SET
+          status = $2,
+          ready_at = CASE WHEN $2 = 'ready' THEN NOW() ELSE NULL END,
+          left_at = CASE WHEN $2 = 'left' THEN NOW() ELSE NULL END,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [params.partyMemberId, params.status],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function updateParty(params: {
+  partyId: string;
+  status?: PartyRecord["status"];
+  activeRunId?: string | null;
+  leaderUserId?: string;
+  partyName?: string | null;
+}): Promise<PartyRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<PartyRecord>(
+      `
+        UPDATE parties
+        SET
+          status = COALESCE($2, status),
+          active_run_id = CASE
+            WHEN $3 THEN $4
+            ELSE active_run_id
+          END,
+          leader_user_id = COALESCE($5, leader_user_id),
+          party_name = COALESCE($6, party_name),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        params.partyId,
+        params.status ?? null,
+        params.activeRunId !== undefined,
+        params.activeRunId ?? null,
+        params.leaderUserId ?? null,
+        params.partyName ?? null,
+      ],
     );
 
     return result.rows[0] ?? null;

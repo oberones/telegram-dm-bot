@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { handlePartyCallback, handlePartyCommand } from "@dm-bot/crawler-domain";
 
 import {
   handleCallback,
@@ -41,6 +42,8 @@ type TelegramUpdateDeps = {
   handleParsedDisputeCommand: typeof handleParsedDisputeCommand;
   handleReplyDisputeCommand: typeof handleReplyDisputeCommand;
   handleTextMessage: typeof handleTextMessage;
+  handlePartyCommand: typeof handlePartyCommand;
+  handlePartyCallback: typeof handlePartyCallback;
 };
 
 const defaultDeps: TelegramUpdateDeps = {
@@ -61,6 +64,8 @@ const defaultDeps: TelegramUpdateDeps = {
   handleParsedDisputeCommand,
   handleReplyDisputeCommand,
   handleTextMessage,
+  handlePartyCommand,
+  handlePartyCallback,
 };
 
 function actorFromUser(user: {
@@ -83,6 +88,23 @@ export async function processTelegramUpdate(
   deps: TelegramUpdateDeps = defaultDeps,
 ) {
   if (update.callback_query?.from && update.callback_query.message?.chat.id) {
+    if ((update.callback_query.data ?? "").startsWith("crawler:party:")) {
+      const result = await deps.handlePartyCallback(
+        actorFromUser(update.callback_query.from),
+        update.callback_query.data ?? "",
+      );
+
+      if (result.alertText) {
+        await app.telegram.answerCallbackQuery(update.callback_query.id, result.alertText);
+      }
+
+      if (result.message) {
+        await app.telegram.sendMessage(update.callback_query.message.chat.id, result.message);
+      }
+
+      return;
+    }
+
     const result = await deps.handleCallback(
       actorFromUser(update.callback_query.from),
       update.callback_query.data ?? "",
@@ -124,6 +146,18 @@ export async function processTelegramUpdate(
 
   if (normalizedCommand === "/status") {
     await app.telegram.sendMessage(chatId, await deps.handleStatus());
+    return;
+  }
+
+  if (normalizedCommand === "/party") {
+    if (isPrivateChat) {
+      await app.telegram.sendMessage(chatId, {
+        text: "Party formation works in a group chat right now. Open your group with the bot and send /party there.",
+      });
+      return;
+    }
+
+    await app.telegram.sendMessage(chatId, await deps.handlePartyCommand(actor));
     return;
   }
 

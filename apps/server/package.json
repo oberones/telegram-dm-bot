@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@dm-bot/crawler-domain": "0.17.0",
     "@dm-bot/db": "0.17.0",
     "@dm-bot/domain": "0.17.0",
     "@dm-bot/shared": "0.17.0",

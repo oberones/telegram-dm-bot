@@ -9,11 +9,14 @@ import {
   getDisputeById,
   getMatchById,
   getUserById,
+  listActiveAdventureRuns,
   listCharacters,
   listDisputes,
   listAuditLogs,
   listMatchEvents,
   listMatchParticipants,
+  listPartyMemberDetails,
+  listPartySummaries,
   listMatches,
   listUsers,
   setCharacterStatus,
@@ -52,6 +55,9 @@ type AdminRouteDeps = {
   cancelPendingDisputeByAdmin: typeof cancelPendingDisputeByAdmin;
   listUsers: typeof listUsers;
   listCharacters: typeof listCharacters;
+  listPartySummaries: typeof listPartySummaries;
+  listPartyMemberDetails: typeof listPartyMemberDetails;
+  listActiveAdventureRuns: typeof listActiveAdventureRuns;
   listAuditLogs: typeof listAuditLogs;
   setUserStatus: typeof setUserStatus;
   setCharacterStatus: typeof setCharacterStatus;
@@ -77,6 +83,9 @@ const defaultDeps: AdminRouteDeps = {
   cancelPendingDisputeByAdmin,
   listUsers,
   listCharacters,
+  listPartySummaries,
+  listPartyMemberDetails,
+  listActiveAdventureRuns,
   listAuditLogs,
   setUserStatus,
   setCharacterStatus,
@@ -188,6 +197,42 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
         ...dispute,
         recovery_hint: explainFlaggedDispute(dispute.status),
       })),
+    };
+  });
+
+  app.get("/api/parties", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const parties = await deps.listPartySummaries();
+    const withMembers = await Promise.all(
+      parties.map(async (party) => ({
+        ...party,
+        members: await deps.listPartyMemberDetails(party.id),
+      })),
+    );
+
+    return {
+      parties: withMembers,
+    };
+  });
+
+  app.get("/api/runs", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    return {
+      runs: await deps.listActiveAdventureRuns(),
     };
   });
 

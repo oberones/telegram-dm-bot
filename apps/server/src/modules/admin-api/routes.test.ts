@@ -65,6 +65,9 @@ function buildTestApp(overrides?: Partial<NonNullable<Parameters<typeof register
     getDashboardCounts: async () => ({ pendingDisputes: 0, runningMatches: 0, failedMatches: 0 }),
     listMatches: async () => [],
     listDisputes: async () => [],
+    listPartySummaries: async () => [],
+    listPartyMemberDetails: async () => [],
+    listActiveAdventureRuns: async () => [],
     getDisputeById: async () => null,
     cancelPendingDisputeByAdmin: async () => null,
     listUsers: async () => [],
@@ -206,6 +209,46 @@ test("POST /api/login delegates to loginAdmin for valid credentials", async () =
       role: "super_admin",
     },
   });
+});
+
+test("GET /api/parties returns active parties with members for authenticated admins", async () => {
+  const { app } = buildTestApp({
+    listPartySummaries: async () => [{
+      id: "party-1",
+      leader_user_id: "user-1",
+      leader_display_name: "Bilbo",
+      status: "forming",
+      active_run_id: null,
+      party_name: "Bilbo's party",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }],
+    listPartyMemberDetails: async () => [{
+      id: "member-1",
+      party_id: "party-1",
+      user_id: "user-1",
+      character_id: "char-1",
+      status: "joined",
+      joined_at: new Date(),
+      ready_at: null,
+      left_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+      user_display_name: "Bilbo",
+      telegram_username: "bilbo",
+      character_name: "Rheen",
+      class_key: "fighter",
+    }],
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/parties",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().parties[0].id, "party-1");
+  assert.equal(response.json().parties[0].members[0].character_name, "Rheen");
 });
 
 test("POST /api/disputes/:id/cancel rejects moderator role", async () => {
