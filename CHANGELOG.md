@@ -1,3 +1,9 @@
+## 0.16.0 (2026-03-25)
+
+### Feat
+
+- improved combat logging
+
 ## 0.15.0 (2026-03-25)
 
 ### Feat
