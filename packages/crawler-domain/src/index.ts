@@ -37,6 +37,7 @@ import {
   unequipInventoryItemForCharacter,
   updateEncounter,
   updateAdventureRun,
+  updateInventoryItemStatus,
   updateParty,
   updateRunRoom,
   upsertLootTemplate,
@@ -472,6 +473,19 @@ function chooseRoomEffect(
   return null;
 }
 
+function consumableEffectForTemplateKey(templateKey: string): RunEffectRecord | null {
+  if (templateKey === "minor_healing_potion") {
+    return {
+      key: "minor_healing_potion",
+      label: "Mending Draught",
+      summary: "+3 max HP in the next encounter.",
+      maxHpBonus: 3,
+    };
+  }
+
+  return null;
+}
+
 function toPlayerEncounterParticipant(
   member: PartyMemberDetailRecord,
   character: CharacterRecord,
@@ -823,12 +837,21 @@ function formatInventoryMessage(
     return { text: lines.join("\n") };
   }
 
+  const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
+
   for (const item of inventoryItems.slice(0, 20)) {
     const template = item.loot_template_id ? lootById.get(item.loot_template_id) : null;
     const name = template?.display_name ?? "Unknown item";
     const quantity = item.quantity > 1 ? ` x${item.quantity}` : "";
     const rarity = template?.rarity_key ? ` (${template.rarity_key})` : "";
     lines.push(`- ${name}${quantity}${rarity} [${item.status}]`);
+
+    if (template?.category_key === "consumable" && item.status === "owned") {
+      buttons.push([{
+        text: `Use ${template.display_name}`,
+        callback_data: `crawler:inventory:use:${item.id}`,
+      }]);
+    }
   }
 
   if (inventoryItems.length > 20) {
@@ -838,6 +861,7 @@ function formatInventoryMessage(
 
   return {
     text: lines.join("\n"),
+    ...(buttons.length > 0 ? { replyMarkup: { inline_keyboard: buttons.slice(0, 8) } } : {}),
   };
 }
 
@@ -1420,6 +1444,104 @@ export async function handleCrawlerCallback(
     return {
       alertText: "Your crawler access is restricted",
       message: { text: restrictedUserMessage() },
+    };
+  }
+
+  if (callbackData.startsWith("crawler:inventory:use:")) {
+    const inventoryItemId = callbackData.slice("crawler:inventory:use:".length);
+
+    if (!inventoryItemId) {
+      return {
+        alertText: "That consumable could not be used",
+      };
+    }
+
+    await ensureCrawlerContent();
+
+    const character = await getEligibleCharacterByUserId(user.id);
+
+    if (!character) {
+      return {
+        alertText: "No active character found",
+      };
+    }
+
+    const inventoryItem = await getInventoryItemById(inventoryItemId);
+
+    if (!inventoryItem || inventoryItem.user_id !== user.id || inventoryItem.character_id !== character.id) {
+      return {
+        alertText: "That item is not available to this character",
+      };
+    }
+
+    if (inventoryItem.status !== "owned") {
+      return {
+        alertText: "That item can no longer be used",
+      };
+    }
+
+    const lootTemplates = await listLootTemplates();
+    const template = inventoryItem.loot_template_id
+      ? lootTemplates.find((candidate) => candidate.id === inventoryItem.loot_template_id)
+      : null;
+
+    if (!template || template.category_key !== "consumable") {
+      return {
+        alertText: "That item is not a usable consumable",
+      };
+    }
+
+    const activeParty = await getActivePartyForUser(user.id);
+
+    if (!activeParty || activeParty.status !== "in_run" || !activeParty.active_run_id) {
+      return {
+        alertText: "Consumables can only be used during an active crawler run",
+      };
+    }
+
+    const run = await getAdventureRunById(activeParty.active_run_id);
+
+    if (!run || !["awaiting_choice", "active", "in_run", "in_combat", "paused"].includes(run.status)) {
+      return {
+        alertText: "There is no active run ready for consumables right now",
+      };
+    }
+
+    const effect = consumableEffectForTemplateKey(template.template_key);
+
+    if (!effect) {
+      return {
+        alertText: "That consumable is not supported yet",
+      };
+    }
+
+    const nextEffects = [...getActiveRunEffects(run), effect];
+
+    await updateInventoryItemStatus({
+      inventoryItemId: inventoryItem.id,
+      status: "consumed",
+    });
+    await updateAdventureRun({
+      runId: run.id,
+      summary: buildRunSummary(run, {}, nextEffects),
+    });
+    await createAuditLog({
+      actorType: "user",
+      actorUserId: user.id,
+      action: "crawler_consumable_used",
+      targetType: "inventory_item",
+      targetId: inventoryItem.id,
+      metadata: {
+        runId: run.id,
+        characterId: character.id,
+        templateKey: template.template_key,
+        effect,
+      },
+    });
+
+    return {
+      alertText: `${template.display_name} used`,
+      message: await handleInventoryCommand(actor),
     };
   }
 
