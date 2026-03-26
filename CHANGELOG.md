@@ -1,3 +1,9 @@
+## 0.15.0 (2026-03-25)
+
+### Feat
+
+- add flair to combat log and results
+
 ## 0.14.0 (2026-03-25)
 
 ### Feat
