@@ -1,3 +1,9 @@
+## 0.27.1 (2026-03-26)
+
+### Fix
+
+- update character screen with correct xp name
+
 ## 0.27.0 (2026-03-26)
 
 ### Feat
