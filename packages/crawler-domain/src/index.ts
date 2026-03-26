@@ -352,6 +352,17 @@ type EquipmentEffect = {
   attackBonus: number;
   armorClassBonus: number;
   maxHpBonus: number;
+  initiativeBonus: number;
+};
+
+type RunEffectRecord = {
+  key: string;
+  label: string;
+  summary: string;
+  attackBonus?: number;
+  armorClassBonus?: number;
+  maxHpBonus?: number;
+  initiativeBonus?: number;
 };
 
 function appliesToClass(effectData: Record<string, unknown> | null, classKey: string) {
@@ -379,18 +390,93 @@ function extractEquipmentEffect(
       attackBonus: totals.attackBonus + (typeof effectData.attackBonus === "number" ? effectData.attackBonus : 0),
       armorClassBonus: totals.armorClassBonus + (typeof effectData.armorClassBonus === "number" ? effectData.armorClassBonus : 0),
       maxHpBonus: totals.maxHpBonus + (typeof effectData.maxHpBonus === "number" ? effectData.maxHpBonus : 0),
+      initiativeBonus: totals.initiativeBonus + (typeof effectData.initiativeBonus === "number" ? effectData.initiativeBonus : 0),
     };
   }, {
     attackBonus: 0,
     armorClassBonus: 0,
     maxHpBonus: 0,
+    initiativeBonus: 0,
   });
+}
+
+function getActiveRunEffects(run: AdventureRunRecord): RunEffectRecord[] {
+  const activeEffects = run.summary?.activeEffects;
+
+  if (!Array.isArray(activeEffects)) {
+    return [];
+  }
+
+  return activeEffects.filter((effect): effect is RunEffectRecord => {
+    return typeof effect === "object" && effect !== null && typeof effect.key === "string" && typeof effect.label === "string";
+  });
+}
+
+function summarizeRunEffects(effects: RunEffectRecord[]) {
+  return effects.map((effect) => `${effect.label}: ${effect.summary}`);
+}
+
+function buildRunSummary(
+  run: AdventureRunRecord,
+  overrides: Record<string, unknown> = {},
+  activeEffects?: RunEffectRecord[],
+) {
+  const summary = { ...(run.summary ?? {}) };
+
+  if (activeEffects !== undefined) {
+    summary.activeEffects = activeEffects;
+  }
+
+  return {
+    ...summary,
+    ...overrides,
+  };
+}
+
+function chooseRoomEffect(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+): RunEffectRecord | null {
+  const seed = `${run.seed}:${room.id}`;
+  let hash = 0;
+
+  for (const character of seed) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+
+  if (room.room_type === "rest") {
+    return {
+      key: "fortified_rest",
+      label: "Fortified Rest",
+      summary: "+2 max HP in the next encounter.",
+      maxHpBonus: 2,
+    };
+  }
+
+  if (room.room_type === "event") {
+    return hash % 2 === 0
+      ? {
+        key: "quickened_steps",
+        label: "Quickened Steps",
+        summary: "+2 initiative in the next encounter.",
+        initiativeBonus: 2,
+      }
+      : {
+        key: "omens_of_war",
+        label: "Omens of War",
+        summary: "+1 attack in the next encounter.",
+        attackBonus: 1,
+      };
+  }
+
+  return null;
 }
 
 function toPlayerEncounterParticipant(
   member: PartyMemberDetailRecord,
   character: CharacterRecord,
   loadouts: EquipmentLoadoutDetailRecord[],
+  runEffects: RunEffectRecord[],
   slot: number,
 ): EncounterParticipant {
   const derived = character.derived_stats as { maxHp?: number; armorClass?: number; initiativeMod?: number };
@@ -418,17 +504,29 @@ function toPlayerEncounterParticipant(
     "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
   > = profileByClass[character.class_key] ?? defaultProfile;
   const equipmentEffect = extractEquipmentEffect(loadouts, character.class_key);
+  const runEffectTotals = runEffects.reduce<EquipmentEffect>((totals, effect) => ({
+    attackBonus: totals.attackBonus + (effect.attackBonus ?? 0),
+    armorClassBonus: totals.armorClassBonus + (effect.armorClassBonus ?? 0),
+    maxHpBonus: totals.maxHpBonus + (effect.maxHpBonus ?? 0),
+    initiativeBonus: totals.initiativeBonus + (effect.initiativeBonus ?? 0),
+  }), {
+    attackBonus: 0,
+    armorClassBonus: 0,
+    maxHpBonus: 0,
+    initiativeBonus: 0,
+  });
   const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+  const effectiveMaxHp = maxHitPoints + runEffectTotals.maxHpBonus;
 
   return {
     id: `player-${slot}-${character.id}`,
     name: character.name,
     side: "player",
-    initiativeModifier: derived.initiativeMod ?? 0,
-    armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus,
-    hitPoints: maxHitPoints,
-    maxHitPoints,
-    attackModifier: profile.attackModifier + equipmentEffect.attackBonus,
+    initiativeModifier: (derived.initiativeMod ?? 0) + runEffectTotals.initiativeBonus,
+    armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus + runEffectTotals.armorClassBonus,
+    hitPoints: effectiveMaxHp,
+    maxHitPoints: effectiveMaxHp,
+    attackModifier: profile.attackModifier + equipmentEffect.attackBonus + runEffectTotals.attackBonus,
     damageDiceCount: profile.damageDiceCount,
     damageDieSides: profile.damageDieSides,
     damageModifier: profile.damageModifier,
@@ -555,6 +653,7 @@ function formatRoomRewardMessage(
   run: AdventureRunRecord,
   room: RunRoomDetailRecord,
   rewards: GrantedRewardSummary,
+  gainedEffect: RunEffectRecord | null,
   next: RunRoomDetailRecord | null,
   memberCount: number,
 ) {
@@ -572,6 +671,12 @@ function formatRoomRewardMessage(
     "Rewards",
     ...(rewards.summaryLines.length > 0 ? rewards.summaryLines : ["- No rewards granted."]),
   ];
+
+  if (gainedEffect) {
+    lines.push("");
+    lines.push("Boon");
+    lines.push(`- ${gainedEffect.label}: ${gainedEffect.summary}`);
+  }
 
   if (next && prompt) {
     lines.push("");
@@ -649,6 +754,13 @@ function formatActiveRoomPrompt(
     prompt.description ?? "A new chamber lies ahead.",
     `Room type: ${(prompt.roomType ?? room.room_type).replaceAll("_", " ")}`,
   ];
+  const activeEffects = getActiveRunEffects(run);
+
+  if (activeEffects.length > 0) {
+    lines.push("");
+    lines.push("Active boons");
+    lines.push(...summarizeRunEffects(activeEffects).map((summary) => `- ${summary}`));
+  }
 
   return {
     text: lines.join("\n"),
@@ -877,7 +989,10 @@ async function persistGeneratedRun(runId: string, generated: GeneratedRun) {
   });
 }
 
-async function buildPlayerParticipants(members: PartyMemberDetailRecord[]) {
+async function buildPlayerParticipants(
+  members: PartyMemberDetailRecord[],
+  runEffects: RunEffectRecord[],
+) {
   const currentMembers = activeMembers(members);
   const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
   const loadouts = await Promise.all(currentMembers.map((member) => listEquipmentLoadoutsForCharacter(member.character_id)));
@@ -890,7 +1005,7 @@ async function buildPlayerParticipants(members: PartyMemberDetailRecord[]) {
       return [];
     }
 
-    return [toPlayerEncounterParticipant(member, character, characterLoadouts, index + 1)];
+    return [toPlayerEncounterParticipant(member, character, characterLoadouts, runEffects, index + 1)];
   });
 }
 
@@ -1093,7 +1208,7 @@ async function resolveEncounterRoom(
   members: PartyMemberDetailRecord[],
 ) {
   await ensureCrawlerContent();
-  const playerParticipants = await buildPlayerParticipants(members);
+  const playerParticipants = await buildPlayerParticipants(members, getActiveRunEffects(run));
   const monsterParticipants = buildMonsterParticipants(room);
   const participants = [...playerParticipants, ...monsterParticipants];
   const result = resolveEncounter({
@@ -1785,10 +1900,10 @@ export async function handleCrawlerCallback(
           status: "failed",
           currentRoomId: currentRoom.id,
           currentFloorNumber: currentRoom.floor_number,
-          summary: {
+          summary: buildRunSummary(run, {
             failedRoomId: currentRoom.id,
             failedRoomType: currentRoom.room_type,
-          },
+          }, []),
         });
         await updateParty({
           partyId: party.id,
@@ -1816,6 +1931,7 @@ export async function handleCrawlerCallback(
           status: "completed",
           currentRoomId: currentRoom.id,
           currentFloorNumber: currentRoom.floor_number,
+          summary: buildRunSummary(run, {}, []),
         });
         await updateParty({
           partyId: party.id,
@@ -1837,6 +1953,10 @@ export async function handleCrawlerCallback(
       }
 
       await activateRoom(run, next);
+      await updateAdventureRun({
+        runId: run.id,
+        summary: buildRunSummary(run, {}, []),
+      });
 
       return {
         alertText: "Encounter won",
@@ -1858,6 +1978,10 @@ export async function handleCrawlerCallback(
     });
 
     const rewards = await grantRoomRewards(run, currentRoom, members);
+    const gainedEffect = chooseRoomEffect(run, currentRoom);
+    const nextRunEffects = gainedEffect
+      ? [...getActiveRunEffects(run), gainedEffect]
+      : getActiveRunEffects(run);
 
     if (!next) {
       await updateAdventureRun({
@@ -1865,6 +1989,7 @@ export async function handleCrawlerCallback(
         status: "completed",
         currentRoomId: currentRoom.id,
         currentFloorNumber: currentRoom.floor_number,
+        summary: buildRunSummary(run, {}, nextRunEffects),
       });
       await updateParty({
         partyId: party.id,
@@ -1878,6 +2003,7 @@ export async function handleCrawlerCallback(
           (await getAdventureRunById(run.id)) ?? run,
           currentRoom,
           rewards,
+          gainedEffect,
           null,
           memberCount,
         ),
@@ -1885,6 +2011,10 @@ export async function handleCrawlerCallback(
     }
 
     await activateRoom(run, next);
+    await updateAdventureRun({
+      runId: run.id,
+      summary: buildRunSummary(run, {}, nextRunEffects),
+    });
 
     return {
       alertText: `${currentRoom.room_type.replaceAll("_", " ")} resolved`,
@@ -1892,6 +2022,7 @@ export async function handleCrawlerCallback(
         (await getAdventureRunById(run.id)) ?? run,
         currentRoom,
         rewards,
+        gainedEffect,
         next,
         memberCount,
       ),
