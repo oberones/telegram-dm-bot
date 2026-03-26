@@ -39,6 +39,12 @@ export type EncounterRewardSeed = {
   quantity: number;
 };
 
+export type RoomRewardSeed = {
+  recipientSlot: number;
+  templateKey: string;
+  quantity: number;
+};
+
 export type RoomWeightTable = Record<CrawlerRoomType, number>;
 
 export type GeneratedRoom = {
@@ -356,6 +362,55 @@ export function generateEncounterRewards(
       templateKey: "gold",
       quantity: roomType === "boss" ? 30 : 15,
     });
+
+    if (permanent) {
+      rewards.push({
+        recipientSlot,
+        templateKey: permanent.key,
+        quantity: 1,
+      });
+    }
+  }
+
+  return rewards;
+}
+
+export function generateRoomRewards(
+  seed: string,
+  roomType: Extract<CrawlerRoomType, "treasure" | "event" | "rest">,
+  recipientCount: number,
+): RoomRewardSeed[] {
+  const rng = createRng(seed);
+  const rewards: RoomRewardSeed[] = [];
+  const permanentPool = starterLootTemplates.filter((template) => template.isPermanent);
+
+  for (let recipientSlot = 1; recipientSlot <= recipientCount; recipientSlot += 1) {
+    if (roomType === "rest") {
+      rewards.push({
+        recipientSlot,
+        templateKey: "minor_healing_potion",
+        quantity: 1,
+      });
+      continue;
+    }
+
+    if (roomType === "event") {
+      rewards.push({
+        recipientSlot,
+        templateKey: rng() > 0.5 ? "gold" : "minor_healing_potion",
+        quantity: rng() > 0.5 ? 10 : 1,
+      });
+      continue;
+    }
+
+    rewards.push({
+      recipientSlot,
+      templateKey: "gold",
+      quantity: 20,
+    });
+
+    const permanentIndex = Math.floor(rng() * permanentPool.length);
+    const permanent = permanentPool[permanentIndex] ?? permanentPool[0];
 
     if (permanent) {
       rewards.push({

@@ -56,6 +56,7 @@ import {
 import {
   crawlerContentVersion,
   generateEncounterRewards,
+  generateRoomRewards,
   generateRun,
   getLootTemplateByKey,
   getMonsterTemplateByKey,
@@ -63,6 +64,7 @@ import {
   type GeneratedRoom,
   type LootTemplateSeed,
   type MonsterTemplateSeed,
+  type CrawlerRoomType,
   starterLootTemplates,
   starterMonsterTemplates,
 } from "@dm-bot/crawler-generation";
@@ -456,6 +458,19 @@ function formatEncounterLog(events: EncounterEvent[]) {
   return events.map((event) => `- ${event.summary}`);
 }
 
+function roomResolutionLead(roomType: RunRoomDetailRecord["room_type"]) {
+  switch (roomType) {
+    case "treasure":
+      return "The party cracks open a hidden cache and banks the spoils.";
+    case "event":
+      return "The party weathers the chamber's strange event and comes away with something to show for it.";
+    case "rest":
+      return "The party gathers themselves in a rare calm and secures a few useful supplies.";
+    default:
+      return "The room has been resolved.";
+  }
+}
+
 type GrantedRewardSummary = {
   rewardRows: RunRewardRecord[];
   summaryLines: string[];
@@ -511,6 +526,54 @@ function formatEncounterVictoryMessage(
 
   if (next) {
     const prompt = next.prompt_payload as { title?: string; description?: string; roomType?: string };
+    lines.push("");
+    lines.push("Next Room");
+    lines.push(prompt.title ?? `Floor ${next.floor_number}, Room ${next.room_number}`);
+    lines.push(prompt.description ?? "A new chamber lies ahead.");
+    lines.push(`Room type: ${(prompt.roomType ?? next.room_type).replaceAll("_", " ")}`);
+
+    return {
+      text: lines.join("\n"),
+      replyMarkup: {
+        inline_keyboard: [[{
+          text: roomActionLabel(next.room_type),
+          callback_data: `crawler:run:proceed:${next.id}`,
+        }]],
+      },
+    } satisfies CrawlerOutboundMessage;
+  }
+
+  lines.push("");
+  lines.push(`The party of ${memberCount} clears the final chamber.`);
+
+  return {
+    text: lines.join("\n"),
+  } satisfies CrawlerOutboundMessage;
+}
+
+function formatRoomRewardMessage(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  rewards: GrantedRewardSummary,
+  next: RunRoomDetailRecord | null,
+  memberCount: number,
+) {
+  const prompt = next
+    ? next.prompt_payload as { title?: string; description?: string; roomType?: string }
+    : null;
+  const lines = [
+    `Room Resolved: ${room.room_type.replaceAll("_", " ")}`,
+    "",
+    `Run ID: ${run.id}`,
+    `Theme: ${run.theme_key ?? "unknown"}`,
+    `Party size: ${memberCount}`,
+    roomResolutionLead(room.room_type),
+    "",
+    "Rewards",
+    ...(rewards.summaryLines.length > 0 ? rewards.summaryLines : ["- No rewards granted."]),
+  ];
+
+  if (next && prompt) {
     lines.push("");
     lines.push("Next Room");
     lines.push(prompt.title ?? `Floor ${next.floor_number}, Room ${next.room_number}`);
@@ -922,6 +985,96 @@ async function grantEncounterRewards(
       metadata: {
         runId: run.id,
         encounterId,
+        rewardCount: rewardRows.length,
+        rewards: rewardRows.map((row) => row.reward_payload),
+      },
+    });
+  }
+
+  return {
+    rewardRows,
+    summaryLines: summarizeRewardRows(rewardRows),
+  };
+}
+
+async function grantRoomRewards(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  members: PartyMemberDetailRecord[],
+): Promise<GrantedRewardSummary> {
+  const currentMembers = activeMembers(members);
+  const existingRewards = await listRunRewardsForRoom(room.id);
+
+  if (existingRewards.length > 0) {
+    return {
+      rewardRows: existingRewards,
+      summaryLines: summarizeRewardRows(existingRewards),
+    };
+  }
+
+  await ensureCrawlerContent();
+
+  const lootTemplates = await listLootTemplates();
+  const lootByKey = new Map(lootTemplates.map((template) => [template.template_key, template]));
+  const rewardRoomType = room.room_type as Extract<CrawlerRoomType, "treasure" | "event" | "rest">;
+  const rewardSeeds = generateRoomRewards(
+    `${run.seed}:${room.id}`,
+    rewardRoomType,
+    currentMembers.length,
+  );
+  const rewardRows: RunRewardRecord[] = [];
+
+  for (const rewardSeed of rewardSeeds) {
+    const member = currentMembers[rewardSeed.recipientSlot - 1];
+    const lootTemplate = lootByKey.get(rewardSeed.templateKey);
+
+    if (!member || !lootTemplate) {
+      continue;
+    }
+
+    const inventoryItem = await createInventoryItem({
+      userId: member.user_id,
+      characterId: member.character_id,
+      lootTemplateId: lootTemplate.id,
+      quantity: rewardSeed.quantity,
+      metadata: {
+        runId: run.id,
+        roomId: room.id,
+        source: "crawler_room_reward",
+        roomType: room.room_type,
+      },
+    });
+
+    const rewardRow = await createRunReward({
+      runId: run.id,
+      roomId: room.id,
+      recipientUserId: member.user_id,
+      recipientCharacterId: member.character_id,
+      lootTemplateId: lootTemplate.id,
+      rewardKind: lootTemplate.category_key,
+      status: "granted",
+      quantity: rewardSeed.quantity,
+      rewardPayload: {
+        itemName: lootTemplate.display_name,
+        quantity: rewardSeed.quantity,
+        recipientName: member.character_name,
+        inventoryItemId: inventoryItem.id,
+        roomType: room.room_type,
+      },
+    });
+
+    rewardRows.push(rewardRow);
+  }
+
+  if (rewardRows.length > 0) {
+    await createAuditLog({
+      actorType: "system",
+      action: "crawler_room_rewards_granted",
+      targetType: "run_room",
+      targetId: room.id,
+      metadata: {
+        runId: run.id,
+        roomType: room.room_type,
         rewardCount: rewardRows.length,
         rewards: rewardRows.map((row) => row.reward_payload),
       },
@@ -1704,6 +1857,8 @@ export async function handleCrawlerCallback(
       resolved: true,
     });
 
+    const rewards = await grantRoomRewards(run, currentRoom, members);
+
     if (!next) {
       await updateAdventureRun({
         runId: run.id,
@@ -1719,7 +1874,13 @@ export async function handleCrawlerCallback(
 
       return {
         alertText: "Run complete",
-        message: formatRunCompleteMessage((await getAdventureRunById(run.id)) ?? run, currentRoom, memberCount),
+        message: formatRoomRewardMessage(
+          (await getAdventureRunById(run.id)) ?? run,
+          currentRoom,
+          rewards,
+          null,
+          memberCount,
+        ),
       };
     }
 
@@ -1727,7 +1888,13 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: `${currentRoom.room_type.replaceAll("_", " ")} resolved`,
-      message: formatActiveRoomPrompt((await getAdventureRunById(run.id)) ?? run, next, memberCount),
+      message: formatRoomRewardMessage(
+        (await getAdventureRunById(run.id)) ?? run,
+        currentRoom,
+        rewards,
+        next,
+        memberCount,
+      ),
     };
   }
 

@@ -5,6 +5,7 @@ import {
   buildRoomWeightsForTheme,
   crawlerThemes,
   generateEncounterRewards,
+  generateRoomRewards,
   generateRun,
   selectThemeFromSeed,
   starterLootTemplates,
@@ -53,4 +54,12 @@ test("generateEncounterRewards is deterministic for a given seed", () => {
 
   assert.deepEqual(first, second);
   assert.equal(first.length, 4);
+});
+
+test("generateRoomRewards is deterministic for a given seed", () => {
+  const first = generateRoomRewards("room-reward-seed", "treasure", 2);
+  const second = generateRoomRewards("room-reward-seed", "treasure", 2);
+
+  assert.deepEqual(first, second);
+  assert.ok(first.length >= 2);
 });
