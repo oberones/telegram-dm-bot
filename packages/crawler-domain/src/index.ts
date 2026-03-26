@@ -1064,7 +1064,7 @@ function formatActiveRoomPrompt(
   run: AdventureRunRecord,
   room: RunRoomDetailRecord,
   memberCount: number,
-  members: PartyMemberDetailRecord[],
+  partyRosterLines: string[],
   surface: CrawlerRunSurface,
 ) {
   const prompt = room.prompt_payload as {
@@ -1092,7 +1092,7 @@ function formatActiveRoomPrompt(
     `Party size: ${memberCount}`,
     "",
     "Party",
-    ...formatPartyRoster(members),
+    ...partyRosterLines,
     "",
     presentation.actionLine,
     "",
@@ -1231,17 +1231,28 @@ export function buildPartyLobbyButtonLabels(params: {
   return labels;
 }
 
-function formatPartyRoster(members: PartyMemberDetailRecord[]) {
+export function formatRunPartyRosterEntry(
+  member: PartyMemberDetailRecord,
+  index: number,
+  character: CharacterRecord | null,
+) {
+  const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
+  const crawlerProgress = character
+    ? ` - crawler Lv${character.crawler_level} (${character.crawler_xp} XP)`
+    : "";
+
+  return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}${crawlerProgress}`;
+}
+
+async function buildRunPartyRoster(members: PartyMemberDetailRecord[]) {
   const currentMembers = activeMembers(members);
 
   if (currentMembers.length === 0) {
     return ["No active party members found."];
   }
 
-  return currentMembers.map((member, index) => {
-    const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
-    return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}`;
-  });
+  const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
+  return currentMembers.map((member, index) => formatRunPartyRosterEntry(member, index, characters[index] ?? null));
 }
 
 function formatInventoryMessage(
@@ -1379,6 +1390,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
   ]);
   const currentRoom = rooms.find((room) => room.id === run.current_room_id) ?? rooms[0];
   const memberCount = activeMembers(members).length;
+  const partyRosterLines = await buildRunPartyRoster(members);
 
   if (!currentRoom) {
     return {
@@ -1398,7 +1410,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
         formatRunCompleteMessage(run, currentRoom, memberCount).text,
         "",
         "Party",
-        ...formatPartyRoster(members),
+        ...partyRosterLines,
         "",
         describeRunPresentationState({
           runStatus: run.status,
@@ -1417,7 +1429,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
         formatRunFailedMessage(run, currentRoom, memberCount).text,
         "",
         "Party",
-        ...formatPartyRoster(members),
+        ...partyRosterLines,
         "",
         describeRunPresentationState({
           runStatus: run.status,
@@ -1435,7 +1447,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
     const snapshot = encounter ? getEncounterStateSnapshot(encounter.encounter_snapshot) : null;
 
     if (encounter && currentRoom && snapshot?.state) {
-      return formatEncounterActionPrompt({
+      const prompt = formatEncounterActionPrompt({
         run,
         room: currentRoom,
         encounterId: encounter.id,
@@ -1443,6 +1455,16 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
         retreatVotes: snapshot.retreatVotes ?? [],
         members,
       });
+
+      return {
+        text: [
+          "Party",
+          ...partyRosterLines,
+          "",
+          prompt.text,
+        ].join("\n"),
+        replyMarkup: prompt.replyMarkup,
+      };
     }
   }
 
@@ -1461,6 +1483,9 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
           `Theme: ${run.theme_key ?? "unknown"}`,
           `Run status: ${run.status.replaceAll("_", " ")}`,
           `Current room: Floor ${currentRoom.floor_number}, Room ${currentRoom.room_number}`,
+          "",
+          "Party",
+          ...partyRosterLines,
           "",
           "The party has fallen back from an active encounter.",
           "You can regroup here, use consumables, and re-enter when ready.",
@@ -1484,7 +1509,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
   });
 
   if (presentation.showRoomPrompt) {
-    return formatActiveRoomPrompt(run, currentRoom, memberCount, members, surface);
+    return formatActiveRoomPrompt(run, currentRoom, memberCount, partyRosterLines, surface);
   }
 
   return {
@@ -1498,7 +1523,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
       `Party size: ${memberCount}`,
       "",
       "Party",
-      ...formatPartyRoster(members),
+      ...partyRosterLines,
       "",
       presentation.actionLine,
     ].join("\n"),

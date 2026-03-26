@@ -49,10 +49,13 @@ type UserSummary = {
 
 type CharacterSummary = {
   id: string;
+  user_id: string;
   user_display_name: string;
   name: string;
   class_key: string;
   level: number;
+  crawler_level: number;
+  crawler_xp: number;
   status: string;
   wins: number;
   losses: number;
@@ -171,9 +174,7 @@ type CharacterInventoryDetail = {
 };
 
 type CharacterCrawlerLoadoutResponse = {
-  character: CharacterSummary & {
-    user_id: string;
-  };
+  character: CharacterSummary;
   inventory: CharacterInventoryDetail[];
   loadouts: CharacterLoadoutDetail[];
 };
@@ -1176,6 +1177,7 @@ export function App() {
                     <th>Name</th>
                     <th>Owner</th>
                     <th>Class</th>
+                    <th>Crawler XP</th>
                     <th>Status</th>
                     <th>Record</th>
                     <th>Last match</th>
@@ -1189,6 +1191,9 @@ export function App() {
                       <td>{character.user_display_name}</td>
                       <td>
                         {capitalize(character.class_key)} Lv{character.level}
+                      </td>
+                      <td>
+                        Lv{character.crawler_level} • {character.crawler_xp} XP
                       </td>
                       <td>{capitalize(character.status)}</td>
                       <td>
@@ -1231,9 +1236,16 @@ export function App() {
               <div className="stack-list">
                 <div className="list-row">
                   <strong>
-                    {characterLoadout.character.name} ({characterLoadout.character.class_key})
+                    {characterLoadout.character.name} ({capitalize(characterLoadout.character.class_key)})
                   </strong>
                   <span>{capitalize(characterLoadout.character.status)}</span>
+                </div>
+
+                <div className="list-row">
+                  <strong>Progression</strong>
+                  <p>
+                    Arena Lv{characterLoadout.character.level} | Crawler Lv{characterLoadout.character.crawler_level} | {characterLoadout.character.crawler_xp} XP
+                  </p>
                 </div>
 
                 <div className="list-row">

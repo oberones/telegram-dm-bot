@@ -87,6 +87,8 @@ export type AdminCharacterRecord = {
   name: string;
   class_key: string;
   level: number;
+  crawler_level: number;
+  crawler_xp: number;
   status: CharacterRecord["status"];
   wins: number;
   losses: number;
@@ -1619,6 +1621,8 @@ export async function listCharacters(limit = 100): Promise<AdminCharacterRecord[
           c.name,
           c.class_key,
           c.level,
+          c.crawler_level,
+          c.crawler_xp,
           c.status,
           c.wins,
           c.losses,

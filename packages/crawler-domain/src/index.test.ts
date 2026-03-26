@@ -7,6 +7,7 @@ import {
   canStartCrawlerParty,
   describeRunPresentationState,
   encounterXpForRoomType,
+  formatRunPartyRosterEntry,
   isEligibleForCrawlerParty,
 } from "./index.js";
 
@@ -239,5 +240,49 @@ test("encounter xp only goes to surviving active party members", () => {
       characterName: "Alyndra",
       xpGranted: 25,
     }],
+  );
+});
+
+test("run party roster entry includes crawler progression when character data is available", () => {
+  assert.equal(
+    formatRunPartyRosterEntry(
+      {
+        id: "pm-1",
+        party_id: "party-1",
+        user_id: "user-1",
+        character_id: "char-1",
+        status: "ready",
+        joined_at: new Date("2026-03-26T12:00:00Z"),
+        ready_at: new Date("2026-03-26T12:01:00Z"),
+        left_at: null,
+        created_at: new Date("2026-03-26T12:00:00Z"),
+        updated_at: new Date("2026-03-26T12:01:00Z"),
+        user_display_name: "Alice",
+        telegram_username: "alice",
+        character_name: "Alyndra",
+        class_key: "fighter",
+      },
+      0,
+      {
+        id: "char-1",
+        user_id: "user-1",
+        name: "Alyndra",
+        class_key: "fighter",
+        level: 1,
+        crawler_level: 2,
+        crawler_xp: 125,
+        status: "active",
+        rules_version_id: "rules-1",
+        wins: 0,
+        losses: 0,
+        matches_played: 0,
+        derived_stats: {},
+        ability_scores: {},
+        loadout: {},
+        resource_state: {},
+        crawler_stats: {},
+      },
+    ),
+    "1. Alyndra (fighter) - @alice - ready - crawler Lv2 (125 XP)",
   );
 });

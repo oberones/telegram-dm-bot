@@ -414,6 +414,38 @@ test("GET /api/runs includes crawler recovery hints for authenticated admins", a
   assert.match(response.json().runs[0].recovery_hint, /waiting on room input/i);
 });
 
+test("GET /api/characters returns crawler progression fields for authenticated admins", async () => {
+  const { app } = buildTestApp({
+    listCharacters: async () => [{
+      id: "char-1",
+      user_id: "user-1",
+      user_display_name: "Bilbo",
+      telegram_username: "bilbo",
+      name: "Rheen",
+      class_key: "fighter",
+      level: 1,
+      crawler_level: 1,
+      crawler_xp: 75,
+      status: "active",
+      wins: 2,
+      losses: 1,
+      matches_played: 3,
+      created_at: new Date(),
+      last_match_at: new Date(),
+      frozen_reason: null,
+    }],
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/characters",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().characters[0].crawler_level, 1);
+  assert.equal(response.json().characters[0].crawler_xp, 75);
+});
+
 test("GET /api/characters/:id/crawler-loadout returns inventory and equipped items", async () => {
   const { app } = buildTestApp({
     getCharacterById: async () => ({
