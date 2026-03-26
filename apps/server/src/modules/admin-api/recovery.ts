@@ -1,4 +1,4 @@
-import type { MatchRecord } from "@dm-bot/db";
+import type { AdventureRunRecord, MatchRecord } from "@dm-bot/db";
 
 export function explainFlaggedDispute(status: string) {
   if (status === "pending") {
@@ -38,4 +38,33 @@ export function explainFlaggedMatch(params: {
   }
 
   return "No recovery action suggested.";
+}
+
+export function explainFlaggedCrawlerRun(params: {
+  status: AdventureRunRecord["status"];
+  currentRoomId?: string | null;
+  activeEncounterId?: string | null;
+  failureReason?: string | null;
+}) {
+  if (params.status === "error") {
+    return params.failureReason?.trim() || "Run entered an error state and should be failed administratively.";
+  }
+
+  if (params.status === "paused") {
+    return "Run is paused. Review whether it should stay paused or be failed administratively.";
+  }
+
+  if (params.status === "in_combat" || params.activeEncounterId) {
+    return "Run appears to be in combat and may need administrative failure if the encounter is stuck.";
+  }
+
+  if (params.status === "awaiting_choice" && params.currentRoomId) {
+    return "Run is waiting on room input. If players cannot continue, fail the run conservatively.";
+  }
+
+  if (params.status === "active" || params.status === "forming") {
+    return "Run is still marked active and may require administrative failure if it is stuck.";
+  }
+
+  return "No crawler recovery action suggested.";
 }

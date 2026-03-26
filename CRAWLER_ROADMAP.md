@@ -50,11 +50,12 @@ Completed so far:
 - non-combat room flow exists for treasure, event, and rest rooms
 - persistent rewards, inventory, equipment, consumables, and cumulative gold are implemented
 - admin visibility exists for parties, runs, rewards, inventory, and loadouts
+- `/run` resume and inspect flow exists with conservative recovery behavior
+- admin can now fail stuck crawler runs conservatively from the recovery surface
 
 Still not complete:
 
-- `/run` resume and re-entry flow
-- crawler-specific recovery actions for stuck runs/encounters/rewards
+- broader crawler-specific recovery actions for stuck encounters/rewards
 - crawler-specific audit coverage and operational runbooks
 - crawler Alpha/Beta hardening and release work
 

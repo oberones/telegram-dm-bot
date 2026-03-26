@@ -5,11 +5,15 @@ import {
   cancelPendingDisputeByAdmin,
   createAuditLog,
   finalizeMatchByAdmin,
+  getAdventureRunById,
   getCharacterById,
   getDashboardCounts,
   getDisputeById,
   getMatchById,
+  getPartyById,
+  getRunRoomDetailById,
   getUserById,
+  listEncountersForRun,
   listActiveAdventureRuns,
   listEquipmentLoadoutsForCharacter,
   listCharacters,
@@ -26,12 +30,16 @@ import {
   listUsers,
   setCharacterStatus,
   setUserStatus,
+  updateAdventureRun,
+  updateEncounter,
+  updateParty,
+  updateRunRoom,
 } from "@dm-bot/db";
 import { previewMatchResolution } from "@dm-bot/domain";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth, requireAdminRole } from "../../lib/admin-auth.js";
-import { explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
+import { explainFlaggedCrawlerRun, explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
 
 type AdminRouteAuthContext = {
   adminUser: {
@@ -63,11 +71,19 @@ type AdminRouteDeps = {
   listPartySummaries: typeof listPartySummaries;
   listPartyMemberDetails: typeof listPartyMemberDetails;
   listActiveAdventureRuns: typeof listActiveAdventureRuns;
+  getAdventureRunById: typeof getAdventureRunById;
+  getPartyById: typeof getPartyById;
+  getRunRoomDetailById: typeof getRunRoomDetailById;
+  listEncountersForRun: typeof listEncountersForRun;
   listRunRewardsForRun: typeof listRunRewardsForRun;
   listAuditLogs: typeof listAuditLogs;
   setUserStatus: typeof setUserStatus;
   setCharacterStatus: typeof setCharacterStatus;
   createAuditLog: typeof createAuditLog;
+  updateAdventureRun: typeof updateAdventureRun;
+  updateEncounter: typeof updateEncounter;
+  updateParty: typeof updateParty;
+  updateRunRoom: typeof updateRunRoom;
   getCharacterById: typeof getCharacterById;
   listInventoryItemsForCharacter: typeof listInventoryItemsForCharacter;
   listEquipmentLoadoutsForCharacter: typeof listEquipmentLoadoutsForCharacter;
@@ -96,11 +112,19 @@ const defaultDeps: AdminRouteDeps = {
   listPartySummaries,
   listPartyMemberDetails,
   listActiveAdventureRuns,
+  getAdventureRunById,
+  getPartyById,
+  getRunRoomDetailById,
+  listEncountersForRun,
   listRunRewardsForRun,
   listAuditLogs,
   setUserStatus,
   setCharacterStatus,
   createAuditLog,
+  updateAdventureRun,
+  updateEncounter,
+  updateParty,
+  updateRunRoom,
   getCharacterById,
   listInventoryItemsForCharacter,
   listEquipmentLoadoutsForCharacter,
@@ -247,7 +271,15 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
     }
 
     return {
-      runs: await deps.listActiveAdventureRuns(),
+      runs: (await deps.listActiveAdventureRuns()).map((run) => ({
+        ...run,
+        recovery_hint: explainFlaggedCrawlerRun({
+          status: run.status,
+          currentRoomId: run.current_room_id,
+          activeEncounterId: run.active_encounter_id,
+          failureReason: run.failure_reason,
+        }),
+      })),
     };
   });
 
@@ -521,6 +553,131 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
 
     return {
       match,
+    };
+  });
+
+  app.post("/api/runs/:id/fail", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+      reply.code(403);
+      return { error: "Your role cannot fail crawler runs" };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim();
+
+    if (!reason) {
+      reply.code(400);
+      return { error: "A crawler run failure reason is required" };
+    }
+
+    const run = await deps.getAdventureRunById(id);
+
+    if (!run) {
+      reply.code(404);
+      return { error: "Crawler run not found" };
+    }
+
+    if (["completed", "failed", "abandoned", "cancelled"].includes(run.status)) {
+      reply.code(409);
+      return { error: "Only active, paused, or errored crawler runs can be failed" };
+    }
+
+    const party = await deps.getPartyById(run.party_id);
+
+    if (!party) {
+      reply.code(404);
+      return { error: "Crawler party not found" };
+    }
+
+    const [members, encounters, currentRoom] = await Promise.all([
+      deps.listPartyMemberDetails(party.id),
+      deps.listEncountersForRun(run.id),
+      run.current_room_id ? deps.getRunRoomDetailById(run.current_room_id) : Promise.resolve(null),
+    ]);
+
+    await Promise.all(
+      encounters
+        .filter((encounter) => ["queued", "active", "error"].includes(encounter.status))
+        .map((encounter) => deps.updateEncounter({
+          encounterId: encounter.id,
+          status: "cancelled",
+        })),
+    );
+
+    if (currentRoom && currentRoom.resolved_at === null && currentRoom.status !== "failed") {
+      await deps.updateRunRoom({
+        roomId: currentRoom.id,
+        status: "failed",
+        resolved: true,
+      });
+    }
+
+    const failedRun = await deps.updateAdventureRun({
+      runId: run.id,
+      status: "failed",
+      currentFloorNumber: currentRoom?.floor_number ?? run.current_floor_number ?? null,
+      currentRoomId: currentRoom?.id ?? run.current_room_id ?? null,
+      activeEncounterId: null,
+      failureReason: reason,
+      summary: {
+        ...(run.summary ?? {}),
+        adminRecovery: {
+          action: "run_failed_by_admin",
+          reason,
+          actorAdminUserId: auth.adminUser.id,
+          failedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    await deps.updateParty({
+      partyId: party.id,
+      status: "abandoned",
+      activeRunId: null,
+    });
+
+    await deps.createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: "crawler_run_failed_by_admin",
+      targetType: "adventure_run",
+      targetId: run.id,
+      reason,
+      metadata: {
+        partyId: party.id,
+        previousStatus: run.status,
+        currentRoomId: run.current_room_id,
+        cancelledEncounterCount: encounters.filter((encounter) => ["queued", "active", "error"].includes(encounter.status)).length,
+      },
+    });
+
+    const notificationText = [
+      "An administrator closed a crawler run that required recovery.",
+      `Run: ${run.id}`,
+      `Reason: ${reason}`,
+    ].join("\n");
+
+    for (const member of members) {
+      const user = await deps.getUserById(member.user_id);
+
+      if (user) {
+        await app.telegram.sendMessage(user.telegram_user_id, {
+          text: notificationText,
+        });
+      }
+    }
+
+    return {
+      run: failedRun ?? run,
     };
   });
 

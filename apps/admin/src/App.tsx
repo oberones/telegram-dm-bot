@@ -87,8 +87,12 @@ type RunSummary = {
   generation_version: string;
   theme_key: string | null;
   floor_count: number;
+  current_floor_number: number | null;
+  current_room_id: string | null;
+  active_encounter_id: string | null;
   difficulty_tier: number;
   started_at: string | null;
+  recovery_hint: string;
 };
 
 type RunReward = {
@@ -567,6 +571,26 @@ export function App() {
     }
   }
 
+  async function failCrawlerRun(runId: string) {
+    const reason = window.prompt("Why are you failing this crawler run?")?.trim();
+
+    if (!reason) {
+      setError("A crawler run failure reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/runs/${runId}/fail`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await refreshAdminData();
+      setSelectedRunId(runId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Crawler run recovery failed");
+    }
+  }
+
   if (isSessionLoading) {
     return <main className="shell"><section className="panel">Loading admin session...</section></main>;
   }
@@ -922,6 +946,47 @@ export function App() {
               {data.matches.every((match) => match.status !== "running" && match.status !== "error") ? (
                 <div className="list-row">
                   <strong>No running or errored matches are currently flagged.</strong>
+                </div>
+              ) : null}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Active crawler runs</h2>
+              <span>{data.runs.length}</span>
+            </header>
+            <div className="stack-list">
+              {data.runs.map((run) => (
+                <div className="list-row" key={run.id}>
+                  <strong>{run.id}</strong>
+                  <span>{capitalize(run.status)}</span>
+                  <p>
+                    Theme: {run.theme_key ?? "unknown"} | Floor: {run.current_floor_number ?? "unknown"} | Room: {run.current_room_id?.slice(0, 8) ?? "none"}
+                  </p>
+                  <p className="muted-copy">{run.recovery_hint}</p>
+                  <div className="inline-actions">
+                    <button
+                      className="table-action"
+                      onClick={() => setSelectedRunId(run.id)}
+                      type="button"
+                    >
+                      Inspect rewards
+                    </button>
+                    <button
+                      className="table-action"
+                      disabled={!moderationEnabled}
+                      onClick={() => void failCrawlerRun(run.id)}
+                      type="button"
+                    >
+                      Fail run
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {data.runs.length === 0 ? (
+                <div className="list-row">
+                  <strong>No active crawler runs are currently flagged.</strong>
                 </div>
               ) : null}
             </div>

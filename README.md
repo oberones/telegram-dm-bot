@@ -25,8 +25,8 @@ The current product supports:
 - A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, and persistent loot
 - Read-only and operational admin views for users, characters, disputes, matches, recovery state, and audit logs
 - Admin moderation actions such as suspend/reactivate user and freeze/unfreeze character
-- Admin recovery actions such as cancel pending dispute and cancel/finalize flagged match
-- Read-only crawler admin views for parties, active runs, rewards, inventory, and loadouts
+- Admin recovery actions such as cancel pending dispute, cancel/finalize flagged match, and fail stuck crawler runs
+- Crawler admin views for parties, active runs, rewards, inventory, loadouts, and conservative run recovery
 
 ## Repository Layout
 

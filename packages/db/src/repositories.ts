@@ -2430,6 +2430,7 @@ export async function updateAdventureRun(params: {
   currentRoomId?: string | null;
   activeEncounterId?: string | null;
   summary?: Record<string, unknown>;
+  failureReason?: string | null;
 }): Promise<AdventureRunRecord | null> {
   return withTransaction(async (client) => {
     const result = await client.query<AdventureRunRecord>(
@@ -2441,6 +2442,9 @@ export async function updateAdventureRun(params: {
           current_room_id = CASE WHEN $5 THEN $6 ELSE current_room_id END,
           active_encounter_id = CASE WHEN $7 THEN $8 ELSE active_encounter_id END,
           summary = COALESCE($9, summary),
+          completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
+          failed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE failed_at END,
+          failure_reason = CASE WHEN $10 THEN $11 ELSE failure_reason END,
           updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -2455,6 +2459,8 @@ export async function updateAdventureRun(params: {
         params.activeEncounterId !== undefined,
         params.activeEncounterId ?? null,
         params.summary ?? null,
+        params.failureReason !== undefined,
+        params.failureReason ?? null,
       ],
     );
 
@@ -2509,6 +2515,22 @@ export async function listActiveAdventureRuns(): Promise<AdventureRunRecord[]> {
         WHERE status IN ('forming', 'active', 'awaiting_choice', 'in_combat', 'paused')
         ORDER BY created_at DESC
       `,
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listEncountersForRun(runId: string): Promise<EncounterRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterRecord>(
+      `
+        SELECT *
+        FROM encounters
+        WHERE run_id = $1
+        ORDER BY created_at ASC
+      `,
+      [runId],
     );
 
     return result.rows;
