@@ -435,7 +435,7 @@ function resolveSecondWind(
     total,
     hpBefore: before,
     hpAfter: actor.currentHp,
-    summary: `${actor.name} regains ${total} HP with Second Wind (${before} -> ${actor.currentHp}).`,
+    summary: `${actor.name} steadies their breathing and regains ${total} HP with Second Wind (${before} -> ${actor.currentHp}).`,
   });
 }
 
@@ -464,7 +464,7 @@ function resolveSavingThrowAction(
     modifier,
     total,
     isSuccess,
-    summary: `${target.name} makes a ${action.save!.type.toUpperCase()} save: d20=${saveRoll} + ${modifier} = ${total} vs DC ${action.save!.dc}${isSuccess ? " success" : " fail"}.`,
+    summary: `${savingThrowLeadIn(action.actionKey, target.name)} d20=${saveRoll} + ${modifier} = ${total} vs DC ${action.save!.dc}${isSuccess ? " success" : " fail"}.`,
   });
 
   if (isSuccess) {
@@ -499,7 +499,7 @@ function resolveAttackAction(
       targetArmorClass: target.armorClass,
       isHit: true,
       isCritical: false,
-      summary: `${actor.name} uses ${action.actionKey}, which hits automatically.`,
+      summary: `${autoHitLeadIn(action.actionKey, actor.name)} It hits automatically.`,
     });
 
     applyDamage(actor, target, action, damageRolls, round, events);
@@ -533,7 +533,7 @@ function resolveAttackAction(
     isHit,
     isCritical,
     summary:
-      `${actor.name} attacks with ${action.actionKey}${hasAdvantage ? " with advantage" : ""}: d20=${attackRoll} + ${action.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
+      `${attackLeadIn(action.actionKey, actor.name, hasAdvantage)} d20=${attackRoll} + ${action.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
   });
 
   if (!isHit) {
@@ -597,7 +597,7 @@ function applyDamage(
     total,
     targetHpBefore: before,
     targetHpAfter: target.currentHp,
-    summary: `${actor.name} deals ${total} damage to ${target.name} with ${action.actionKey} (${before} -> ${target.currentHp}).`,
+    summary: `${damageLeadIn(action.actionKey, actor.name, target.name)} ${total} damage (${before} -> ${target.currentHp}).`,
   });
 }
 
@@ -691,4 +691,58 @@ function sum(values: number[]) {
 
 function abilityModifier(score: number) {
   return Math.floor((score - 10) / 2);
+}
+
+function attackLeadIn(actionKey: string, actorName: string, hasAdvantage: boolean) {
+  const advantageText = hasAdvantage ? " with advantage" : "";
+
+  switch (actionKey) {
+    case "Longsword Attack":
+      return `${actorName} swings a longsword${advantageText}:`;
+    case "Rapier Attack":
+      return `${actorName} lunges with a rapier${advantageText}:`;
+    case "Fire Bolt":
+      return `${actorName} hurls a crackling Fire Bolt${advantageText}:`;
+    case "Guiding Bolt":
+      return `${actorName} calls down a Guiding Bolt${advantageText}:`;
+    default:
+      return `${actorName} attacks with ${actionKey}${advantageText}:`;
+  }
+}
+
+function autoHitLeadIn(actionKey: string, actorName: string) {
+  switch (actionKey) {
+    case "Magic Missile":
+      return `${actorName} releases a trio of glowing darts with Magic Missile.`;
+    default:
+      return `${actorName} uses ${actionKey}.`;
+  }
+}
+
+function damageLeadIn(actionKey: string, actorName: string, targetName: string) {
+  switch (actionKey) {
+    case "Longsword Attack":
+      return `${actorName}'s blade bites into ${targetName} for`;
+    case "Rapier Attack":
+      return `${actorName}'s rapier strikes true against ${targetName} for`;
+    case "Fire Bolt":
+      return `${actorName}'s Fire Bolt scorches ${targetName} for`;
+    case "Magic Missile":
+      return `${actorName}'s magic darts slam into ${targetName} for`;
+    case "Sacred Flame":
+      return `Radiant fire washes over ${targetName} for`;
+    case "Guiding Bolt":
+      return `${actorName}'s radiant burst crashes into ${targetName} for`;
+    default:
+      return `${actorName} deals to ${targetName}`;
+  }
+}
+
+function savingThrowLeadIn(actionKey: string, targetName: string) {
+  switch (actionKey) {
+    case "Sacred Flame":
+      return `${targetName} tries to evade the descending Sacred Flame:`;
+    default:
+      return `${targetName} makes a ${actionKey} save:`;
+  }
 }
