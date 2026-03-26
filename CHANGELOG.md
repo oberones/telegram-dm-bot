@@ -1,3 +1,9 @@
+## 0.18.0 (2026-03-26)
+
+### Feat
+
+- add party support for crawler mode
+
 ## 0.17.0 (2026-03-26)
 
 ### Feat
