@@ -3201,3 +3201,19 @@ export async function listRunRewardsForRoom(roomId: string): Promise<RunRewardRe
     return result.rows;
   });
 }
+
+export async function listRunRewardsForRun(runId: string): Promise<RunRewardRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRewardRecord>(
+      `
+        SELECT *
+        FROM run_rewards
+        WHERE run_id = $1
+        ORDER BY created_at ASC, id ASC
+      `,
+      [runId],
+    );
+
+    return result.rows;
+  });
+}

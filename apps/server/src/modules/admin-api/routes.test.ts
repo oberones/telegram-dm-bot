@@ -68,6 +68,7 @@ function buildTestApp(overrides?: Partial<NonNullable<Parameters<typeof register
     listPartySummaries: async () => [],
     listPartyMemberDetails: async () => [],
     listActiveAdventureRuns: async () => [],
+    listRunRewardsForRun: async () => [],
     getDisputeById: async () => null,
     cancelPendingDisputeByAdmin: async () => null,
     listUsers: async () => [],
@@ -76,6 +77,10 @@ function buildTestApp(overrides?: Partial<NonNullable<Parameters<typeof register
     setUserStatus: async () => null,
     setCharacterStatus: async () => null,
     createAuditLog: async () => undefined,
+    getCharacterById: async () => null,
+    listInventoryItemsForCharacter: async () => [],
+    listEquipmentLoadoutsForCharacter: async () => [],
+    listLootTemplates: async () => [],
     listMatchParticipants: async () => [],
     cancelMatchByAdmin: async () => null,
     finalizeMatchByAdmin: async () => null,
@@ -249,6 +254,111 @@ test("GET /api/parties returns active parties with members for authenticated adm
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().parties[0].id, "party-1");
   assert.equal(response.json().parties[0].members[0].character_name, "Rheen");
+});
+
+test("GET /api/runs/:id/rewards returns reward ledger rows for authenticated admins", async () => {
+  const { app } = buildTestApp({
+    listRunRewardsForRun: async () => [{
+      id: "reward-1",
+      run_id: "run-1",
+      room_id: "room-1",
+      encounter_id: "encounter-1",
+      recipient_user_id: "user-1",
+      recipient_character_id: "char-1",
+      loot_template_id: "loot-1",
+      reward_kind: "weapon",
+      status: "granted",
+      quantity: 1,
+      reward_payload: {
+        itemName: "Balanced Longsword",
+      },
+      granted_at: new Date(),
+      revoked_at: null,
+      created_at: new Date(),
+    }],
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/runs/run-1/rewards",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().rewards[0].reward_kind, "weapon");
+});
+
+test("GET /api/characters/:id/crawler-loadout returns inventory and equipped items", async () => {
+  const { app } = buildTestApp({
+    getCharacterById: async () => ({
+      id: "char-1",
+      user_id: "user-1",
+      name: "Rheen",
+      class_key: "fighter",
+      level: 1,
+      rules_version_id: "rules-1",
+      status: "active",
+      ability_scores: {},
+      derived_stats: {},
+      loadout: {},
+      resource_state: {},
+      wins: 0,
+      losses: 0,
+      matches_played: 0,
+      last_match_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    listInventoryItemsForCharacter: async () => [{
+      id: "item-1",
+      user_id: "user-1",
+      character_id: "char-1",
+      loot_template_id: "loot-1",
+      status: "equipped",
+      quantity: 1,
+      metadata: {},
+      acquired_at: new Date(),
+      consumed_at: null,
+      lost_at: null,
+    }],
+    listEquipmentLoadoutsForCharacter: async () => [{
+      id: "loadout-1",
+      character_id: "char-1",
+      slot: "weapon",
+      inventory_item_id: "item-1",
+      equipped_at: new Date(),
+      created_at: new Date(),
+      item_status: "equipped",
+      loot_template_id: "loot-1",
+      loot_template_key: "balanced_longsword",
+      loot_display_name: "Balanced Longsword",
+      category_key: "weapon",
+      rarity_key: "common",
+      effect_data: { attackBonus: 1 },
+    }],
+    listLootTemplates: async () => [{
+      id: "loot-1",
+      template_key: "balanced_longsword",
+      display_name: "Balanced Longsword",
+      category_key: "weapon",
+      rarity_key: "common",
+      equipment_slot: "weapon",
+      is_permanent: true,
+      effect_data: { attackBonus: 1 },
+      drop_rules: {},
+      is_active: true,
+      content_version: "crawler-v1",
+    }],
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/characters/char-1/crawler-loadout",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().character.id, "char-1");
+  assert.equal(response.json().inventory[0].lootTemplate.display_name, "Balanced Longsword");
+  assert.equal(response.json().loadouts[0].slot, "weapon");
 });
 
 test("POST /api/disputes/:id/cancel rejects moderator role", async () => {

@@ -91,6 +91,57 @@ type RunSummary = {
   started_at: string | null;
 };
 
+type RunReward = {
+  id: string;
+  room_id: string | null;
+  encounter_id: string | null;
+  recipient_user_id: string | null;
+  recipient_character_id: string | null;
+  loot_template_id: string | null;
+  reward_kind: string;
+  status: string;
+  quantity: number;
+  reward_payload: {
+    itemName?: string;
+    recipientName?: string;
+    quantity?: number;
+  };
+  granted_at: string | null;
+  created_at: string;
+};
+
+type CharacterLoadoutDetail = {
+  id: string;
+  slot: string;
+  inventory_item_id: string;
+  loot_display_name: string | null;
+  rarity_key: string | null;
+  effect_data: Record<string, unknown> | null;
+};
+
+type CharacterInventoryDetail = {
+  id: string;
+  status: string;
+  quantity: number;
+  acquired_at: string;
+  lootTemplate: null | {
+    id: string;
+    display_name: string;
+    category_key: string;
+    rarity_key: string;
+    equipment_slot: string | null;
+    effect_data: Record<string, unknown>;
+  };
+};
+
+type CharacterCrawlerLoadoutResponse = {
+  character: CharacterSummary & {
+    user_id: string;
+  };
+  inventory: CharacterInventoryDetail[];
+  loadouts: CharacterLoadoutDetail[];
+};
+
 type MatchSummary = {
   id: string;
   dispute_id: string;
@@ -234,7 +285,11 @@ export function App() {
   const [view, setView] = useState<ViewKey>("dashboard");
   const [data, setData] = useState<AdminData>(emptyAdminData);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
   const [matchDetail, setMatchDetail] = useState<MatchDetailResponse | null>(null);
+  const [runRewards, setRunRewards] = useState<RunReward[]>([]);
+  const [characterLoadout, setCharacterLoadout] = useState<CharacterCrawlerLoadoutResponse | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -269,6 +324,8 @@ export function App() {
         auditLogs: auditLogs.auditLogs,
       });
       setSelectedMatchId((current) => current ?? matches.matches[0]?.id ?? null);
+      setSelectedRunId((current) => current ?? runs.runs[0]?.id ?? null);
+      setSelectedCharacterId((current) => current ?? characters.characters[0]?.id ?? null);
     } catch (caughtError: unknown) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown admin loading error");
     } finally {
@@ -294,6 +351,10 @@ export function App() {
       setData(emptyAdminData());
       setSelectedMatchId(null);
       setMatchDetail(null);
+      setSelectedRunId(null);
+      setRunRewards([]);
+      setSelectedCharacterId(null);
+      setCharacterLoadout(null);
       return;
     }
 
@@ -319,6 +380,36 @@ export function App() {
         setIsDetailLoading(false);
       });
   }, [selectedMatchId, session]);
+
+  useEffect(() => {
+    if (!session?.authenticated || !selectedRunId) {
+      setRunRewards([]);
+      return;
+    }
+
+    fetchJson<{ rewards: RunReward[] }>(`/api/runs/${selectedRunId}/rewards`)
+      .then((response) => {
+        setRunRewards(response.rewards);
+      })
+      .catch(() => {
+        setRunRewards([]);
+      });
+  }, [selectedRunId, session]);
+
+  useEffect(() => {
+    if (!session?.authenticated || !selectedCharacterId) {
+      setCharacterLoadout(null);
+      return;
+    }
+
+    fetchJson<CharacterCrawlerLoadoutResponse>(`/api/characters/${selectedCharacterId}/crawler-loadout`)
+      .then((response) => {
+        setCharacterLoadout(response);
+      })
+      .catch(() => {
+        setCharacterLoadout(null);
+      });
+  }, [selectedCharacterId, session]);
 
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -711,13 +802,44 @@ export function App() {
             </header>
             <div className="stack-list">
               {data.runs.map((run) => (
-                <div className="list-row" key={run.id}>
+                <button
+                  className={run.id === selectedRunId ? "list-row selected" : "list-row"}
+                  key={run.id}
+                  onClick={() => setSelectedRunId(run.id)}
+                  type="button"
+                >
                   <strong>{run.id}</strong>
                   <span>{capitalize(run.status)}</span>
                   <p>Party: {run.party_id}</p>
                   <p>Theme: {run.theme_key ?? "unknown"} | Floors: {run.floor_count} | Tier: {run.difficulty_tier}</p>
+                </button>
+              ))}
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Run rewards</h2>
+              <span>{selectedRunId ? selectedRunId.slice(0, 8) : "none"}</span>
+            </header>
+            <div className="stack-list">
+              {runRewards.map((reward) => (
+                <div className="list-row" key={reward.id}>
+                  <strong>{reward.reward_payload.itemName ?? reward.reward_kind}</strong>
+                  <span>{capitalize(reward.status)}</span>
+                  <p>
+                    Recipient: {reward.reward_payload.recipientName ?? "unknown"} | Qty: {reward.reward_payload.quantity ?? reward.quantity}
+                  </p>
+                  <p>
+                    Room: {reward.room_id?.slice(0, 8) ?? "none"} | Granted: {formatDate(reward.granted_at ?? reward.created_at)}
+                  </p>
                 </div>
               ))}
+              {selectedRunId && runRewards.length === 0 ? (
+                <div className="list-row">
+                  <strong>No rewards have been granted for this run yet.</strong>
+                </div>
+              ) : null}
             </div>
           </article>
         </section>
@@ -854,52 +976,110 @@ export function App() {
       ) : null}
 
       {!isLoading && view === "characters" ? (
-        <section className="panel">
-          <header className="panel-header">
-            <h2>Characters</h2>
-            <span>{data.characters.length}</span>
-          </header>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Owner</th>
-                  <th>Class</th>
-                  <th>Status</th>
-                  <th>Record</th>
-                  <th>Last match</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.characters.map((character) => (
-                  <tr key={character.id}>
-                    <td>{character.name}</td>
-                    <td>{character.user_display_name}</td>
-                    <td>
-                      {capitalize(character.class_key)} Lv{character.level}
-                    </td>
-                    <td>{capitalize(character.status)}</td>
-                    <td>
-                      {character.wins}-{character.losses} ({character.matches_played})
-                    </td>
-                    <td>{formatDate(character.last_match_at)}</td>
-                    <td>
-                      <button
-                        className="table-action"
-                        disabled={!moderationEnabled}
-                        onClick={() => void updateCharacterStatus(character.id, character.status)}
-                        type="button"
-                      >
-                        {character.status === "active" ? "Freeze" : "Unfreeze"}
-                      </button>
-                    </td>
+        <section className="dashboard-grid">
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Characters</h2>
+              <span>{data.characters.length}</span>
+            </header>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Owner</th>
+                    <th>Class</th>
+                    <th>Status</th>
+                    <th>Record</th>
+                    <th>Last match</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.characters.map((character) => (
+                    <tr key={character.id}>
+                      <td>{character.name}</td>
+                      <td>{character.user_display_name}</td>
+                      <td>
+                        {capitalize(character.class_key)} Lv{character.level}
+                      </td>
+                      <td>{capitalize(character.status)}</td>
+                      <td>
+                        {character.wins}-{character.losses} ({character.matches_played})
+                      </td>
+                      <td>{formatDate(character.last_match_at)}</td>
+                      <td>
+                        <div className="inline-actions">
+                          <button
+                            className="table-action"
+                            onClick={() => setSelectedCharacterId(character.id)}
+                            type="button"
+                          >
+                            Inspect
+                          </button>
+                          <button
+                            className="table-action"
+                            disabled={!moderationEnabled}
+                            onClick={() => void updateCharacterStatus(character.id, character.status)}
+                            type="button"
+                          >
+                            {character.status === "active" ? "Freeze" : "Unfreeze"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Crawler gear</h2>
+              <span>{selectedCharacterId ? selectedCharacterId.slice(0, 8) : "none"}</span>
+            </header>
+
+            {characterLoadout ? (
+              <div className="stack-list">
+                <div className="list-row">
+                  <strong>
+                    {characterLoadout.character.name} ({characterLoadout.character.class_key})
+                  </strong>
+                  <span>{capitalize(characterLoadout.character.status)}</span>
+                </div>
+
+                <div className="list-row">
+                  <strong>Equipped</strong>
+                  <p>
+                    {characterLoadout.loadouts.length > 0
+                      ? characterLoadout.loadouts.map((loadout) => `${capitalize(loadout.slot)}: ${loadout.loot_display_name ?? "Unknown item"}`).join(" | ")
+                      : "Nothing equipped"}
+                  </p>
+                </div>
+
+                <div className="list-row">
+                  <strong>Inventory</strong>
+                  {characterLoadout.inventory.length > 0 ? (
+                    <>
+                      {characterLoadout.inventory.slice(0, 12).map((item) => (
+                        <p key={item.id}>
+                          {(item.lootTemplate?.display_name ?? "Unknown item")} x{item.quantity} [{item.status}]
+                        </p>
+                      ))}
+                      {characterLoadout.inventory.length > 12 ? (
+                        <p>Showing 12 of {characterLoadout.inventory.length} items.</p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p>No crawler inventory yet.</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p>Select a character to inspect crawler inventory and loadout.</p>
+            )}
+          </article>
         </section>
       ) : null}
 

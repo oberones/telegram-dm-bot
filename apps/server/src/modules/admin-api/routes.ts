@@ -5,19 +5,24 @@ import {
   cancelPendingDisputeByAdmin,
   createAuditLog,
   finalizeMatchByAdmin,
+  getCharacterById,
   getDashboardCounts,
   getDisputeById,
   getMatchById,
   getUserById,
   listActiveAdventureRuns,
+  listEquipmentLoadoutsForCharacter,
   listCharacters,
   listDisputes,
+  listInventoryItemsForCharacter,
+  listLootTemplates,
   listAuditLogs,
   listMatchEvents,
   listMatchParticipants,
   listPartyMemberDetails,
   listPartySummaries,
   listMatches,
+  listRunRewardsForRun,
   listUsers,
   setCharacterStatus,
   setUserStatus,
@@ -58,10 +63,15 @@ type AdminRouteDeps = {
   listPartySummaries: typeof listPartySummaries;
   listPartyMemberDetails: typeof listPartyMemberDetails;
   listActiveAdventureRuns: typeof listActiveAdventureRuns;
+  listRunRewardsForRun: typeof listRunRewardsForRun;
   listAuditLogs: typeof listAuditLogs;
   setUserStatus: typeof setUserStatus;
   setCharacterStatus: typeof setCharacterStatus;
   createAuditLog: typeof createAuditLog;
+  getCharacterById: typeof getCharacterById;
+  listInventoryItemsForCharacter: typeof listInventoryItemsForCharacter;
+  listEquipmentLoadoutsForCharacter: typeof listEquipmentLoadoutsForCharacter;
+  listLootTemplates: typeof listLootTemplates;
   listMatchParticipants: typeof listMatchParticipants;
   cancelMatchByAdmin: typeof cancelMatchByAdmin;
   finalizeMatchByAdmin: typeof finalizeMatchByAdmin;
@@ -86,10 +96,15 @@ const defaultDeps: AdminRouteDeps = {
   listPartySummaries,
   listPartyMemberDetails,
   listActiveAdventureRuns,
+  listRunRewardsForRun,
   listAuditLogs,
   setUserStatus,
   setCharacterStatus,
   createAuditLog,
+  getCharacterById,
+  listInventoryItemsForCharacter,
+  listEquipmentLoadoutsForCharacter,
+  listLootTemplates,
   listMatchParticipants,
   cancelMatchByAdmin,
   finalizeMatchByAdmin,
@@ -233,6 +248,60 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
 
     return {
       runs: await deps.listActiveAdventureRuns(),
+    };
+  });
+
+  app.get("/api/runs/:id/rewards", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const { id } = request.params as { id: string };
+
+    return {
+      rewards: await deps.listRunRewardsForRun(id),
+    };
+  });
+
+  app.get("/api/characters/:id/crawler-loadout", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const { id } = request.params as { id: string };
+    const character = await deps.getCharacterById(id);
+
+    if (!character) {
+      reply.code(404);
+      return {
+        error: "Character not found",
+      };
+    }
+
+    const [inventoryItems, loadouts, lootTemplates] = await Promise.all([
+      deps.listInventoryItemsForCharacter(id),
+      deps.listEquipmentLoadoutsForCharacter(id),
+      deps.listLootTemplates(),
+    ]);
+
+    const lootById = new Map(lootTemplates.map((template) => [template.id, template]));
+    const inventory = inventoryItems.map((item) => ({
+      ...item,
+      lootTemplate: item.loot_template_id ? lootById.get(item.loot_template_id) ?? null : null,
+    }));
+
+    return {
+      character,
+      inventory,
+      loadouts,
     };
   });
 
