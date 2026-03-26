@@ -294,11 +294,9 @@ async function ensureCrawlerContent() {
 function formatPartyLobby(
   party: PartyRecord,
   members: PartyMemberDetailRecord[],
-  viewerUserId: string,
   leaderDisplayName: string,
 ) {
   const currentMembers = activeMembers(members);
-  const viewerMembership = currentMembers.find((member) => member.user_id === viewerUserId);
   const readyCount = currentMembers.filter((member) => member.status === "ready").length;
   const allReady = canStartCrawlerParty({
     memberCount: currentMembers.length,
@@ -331,19 +329,11 @@ function formatPartyLobby(
   const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
 
   if (party.status !== "in_run") {
-    if (!viewerMembership) {
-      buttons.push([{ text: "Join Party", callback_data: `crawler:party:join:${party.id}` }]);
-    } else {
-      buttons.push([
-        {
-          text: viewerMembership.status === "ready" ? "Not Ready" : "Ready Up",
-          callback_data: `crawler:party:ready:${party.id}`,
-        },
-      ]);
-      buttons.push([{ text: "Leave Party", callback_data: `crawler:party:leave:${party.id}` }]);
-    }
+    buttons.push([{ text: "Join Party", callback_data: `crawler:party:join:${party.id}` }]);
+    buttons.push([{ text: "Ready Up / Not Ready", callback_data: `crawler:party:ready:${party.id}` }]);
+    buttons.push([{ text: "Leave Party", callback_data: `crawler:party:leave:${party.id}` }]);
 
-    if (party.leader_user_id === viewerUserId && allReady) {
+    if (allReady) {
       buttons.push([{ text: "Start Run", callback_data: `crawler:party:start:${party.id}` }]);
     }
   }
@@ -1165,6 +1155,23 @@ export function describeRunPresentationState(params: {
   };
 }
 
+export function buildPartyLobbyButtonLabels(params: {
+  partyStatus: PartyRecord["status"];
+  allReady: boolean;
+}) {
+  if (params.partyStatus === "in_run") {
+    return [];
+  }
+
+  const labels = ["Join Party", "Ready Up / Not Ready", "Leave Party"];
+
+  if (params.allReady) {
+    labels.push("Start Run");
+  }
+
+  return labels;
+}
+
 function formatPartyRoster(members: PartyMemberDetailRecord[]) {
   const currentMembers = activeMembers(members);
 
@@ -1288,13 +1295,13 @@ function formatEquipmentMessage(
   };
 }
 
-async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string): Promise<CrawlerOutboundMessage> {
+async function buildPartyLobbyMessage(party: PartyRecord): Promise<CrawlerOutboundMessage> {
   const [members, leader] = await Promise.all([
     listPartyMemberDetails(party.id),
     getUserById(party.leader_user_id),
   ]);
 
-  return formatPartyLobby(party, members, viewerUserId, leader?.display_name ?? "Unknown leader");
+  return formatPartyLobby(party, members, leader?.display_name ?? "Unknown leader");
 }
 
 async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "group"): Promise<CrawlerOutboundMessage> {
@@ -1840,7 +1847,7 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
       return buildRunMessage(existingParty.active_run_id, "group");
     }
 
-    return buildPartyLobbyMessage(existingParty, user.id);
+    return buildPartyLobbyMessage(existingParty);
   }
 
   const character = await getEligibleCharacterByUserId(user.id);
@@ -2220,7 +2227,7 @@ export async function handleCrawlerCallback(
         alertText: "You are already in an active party",
         message: existingParty.status === "in_run" && existingParty.active_run_id
           ? await buildRunMessage(existingParty.active_run_id, "group")
-          : await buildPartyLobbyMessage(existingParty, user.id),
+          : await buildPartyLobbyMessage(existingParty),
       };
     }
 
@@ -2259,7 +2266,7 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: "Party created",
-      message: await buildPartyLobbyMessage(party, user.id),
+      message: await buildPartyLobbyMessage(party),
     };
   }
 
@@ -2280,7 +2287,7 @@ export async function handleCrawlerCallback(
         alertText: "Leave your current party first",
         message: existingParty.status === "in_run" && existingParty.active_run_id
           ? await buildRunMessage(existingParty.active_run_id, "group")
-          : await buildPartyLobbyMessage(existingParty, user.id),
+          : await buildPartyLobbyMessage(existingParty),
       };
     }
 
@@ -2289,7 +2296,7 @@ export async function handleCrawlerCallback(
     if (existingMember && ACTIVE_PARTY_MEMBER_STATUSES.has(existingMember.status)) {
       return {
         alertText: "You are already in this party",
-        message: await buildPartyLobbyMessage(party, user.id),
+        message: await buildPartyLobbyMessage(party),
       };
     }
 
@@ -2321,7 +2328,7 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: "Joined party",
-      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party, user.id),
+      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party),
     };
   }
 
@@ -2349,7 +2356,7 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: willBeReady ? "You are ready" : "You are no longer ready",
-      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party, user.id),
+      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party),
     };
   }
 
@@ -2393,7 +2400,7 @@ export async function handleCrawlerCallback(
 
     return {
       alertText: "You left the party",
-      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party, user.id),
+      message: await buildPartyLobbyMessage((await getPartyById(party.id)) ?? party),
     };
   }
 
@@ -2426,7 +2433,7 @@ export async function handleCrawlerCallback(
     if (!canStartCrawlerParty({ memberCount: members.length, readyMemberCount: readyCount })) {
       return {
         alertText: "Everyone must be ready first",
-        message: await buildPartyLobbyMessage(party, user.id),
+        message: await buildPartyLobbyMessage(party),
       };
     }
 

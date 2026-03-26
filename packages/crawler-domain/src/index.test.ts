@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canStartCrawlerParty, describeRunPresentationState, isEligibleForCrawlerParty } from "./index.js";
+import { buildPartyLobbyButtonLabels, canStartCrawlerParty, describeRunPresentationState, isEligibleForCrawlerParty } from "./index.js";
 
 test("active users with active characters can join crawler parties", () => {
   assert.equal(
@@ -57,6 +57,24 @@ test("crawler parties can only start when all members are ready and within size 
       readyMemberCount: 5,
     }),
     false,
+  );
+});
+
+test("party lobby buttons are group-safe and do not depend on the triggering viewer", () => {
+  assert.deepEqual(
+    buildPartyLobbyButtonLabels({
+      partyStatus: "forming",
+      allReady: false,
+    }),
+    ["Join Party", "Ready Up / Not Ready", "Leave Party"],
+  );
+
+  assert.deepEqual(
+    buildPartyLobbyButtonLabels({
+      partyStatus: "ready",
+      allReady: true,
+    }),
+    ["Join Party", "Ready Up / Not Ready", "Leave Party", "Start Run"],
   );
 });
 
