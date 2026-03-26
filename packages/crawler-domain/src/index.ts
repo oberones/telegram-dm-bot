@@ -4,33 +4,68 @@ import {
   addPartyMember,
   createAdventureRun,
   createAuditLog,
+  createEncounter,
+  createEncounterEvent,
+  createEncounterParticipant,
+  createInventoryItem,
   createParty,
+  createRunReward,
   createRunChoice,
   createRunFloor,
   createRunRoom,
   ensureRulesVersion,
   getActivePartyForUser,
   getAdventureRunById,
+  getCharacterById,
   getEligibleCharacterByUserId,
   getPartyById,
   getPartyMemberByPartyAndUser,
   getRunRoomDetailById,
   getUserById,
+  listInventoryItemsForCharacter,
+  listLootTemplates,
+  listMonsterTemplates,
   listPartyMemberDetails,
+  listRunRewardsForRoom,
   listRunRoomDetails,
   setPartyMemberLeft,
   setPartyMemberReadyState,
   setPartyMemberStatus,
+  updateEncounter,
   updateAdventureRun,
   updateParty,
   updateRunRoom,
+  upsertLootTemplate,
+  upsertMonsterTemplate,
   upsertTelegramUser,
   type AdventureRunRecord,
+  type CharacterRecord,
+  type EncounterParticipantRecord,
+  type LootTemplateRecord,
   type PartyMemberDetailRecord,
   type PartyRecord,
   type RunRoomDetailRecord,
+  type RunRewardRecord,
 } from "@dm-bot/db";
-import { generateRun, type GeneratedRun, type GeneratedRoom } from "@dm-bot/crawler-generation";
+import {
+  crawlerContentVersion,
+  generateEncounterRewards,
+  generateRun,
+  getLootTemplateByKey,
+  getMonsterTemplateByKey,
+  type GeneratedRun,
+  type GeneratedRoom,
+  type LootTemplateSeed,
+  type MonsterTemplateSeed,
+  starterLootTemplates,
+  starterMonsterTemplates,
+} from "@dm-bot/crawler-generation";
+import {
+  resolveEncounter,
+  type EncounterEvent,
+  type EncounterParticipant,
+  type EncounterResolutionResult,
+} from "@dm-bot/crawler-engine";
 
 export type CrawlerOutboundMessage = {
   text: string;
@@ -65,6 +100,7 @@ export type CrawlerPartyStartCheck = {
 };
 
 const ACTIVE_PARTY_MEMBER_STATUSES = new Set<PartyMemberDetailRecord["status"]>(["joined", "ready"]);
+let crawlerContentSeeded = false;
 
 export function isEligibleForCrawlerParty(input: CrawlerPartyEligibility): boolean {
   return (
@@ -140,6 +176,65 @@ async function syncPartyStatus(partyId: string) {
   });
 }
 
+function lootEquipmentSlot(template: LootTemplateSeed) {
+  return template.equipmentSlot ?? null;
+}
+
+async function ensureCrawlerContent() {
+  if (crawlerContentSeeded) {
+    return;
+  }
+
+  const [existingMonsters, existingLoot] = await Promise.all([
+    listMonsterTemplates(),
+    listLootTemplates(),
+  ]);
+
+  if (existingMonsters.length === 0) {
+    for (const template of starterMonsterTemplates) {
+      await upsertMonsterTemplate({
+        templateKey: template.key,
+        displayName: template.name,
+        themeKey: template.themeKey,
+        roleKey: template.role,
+        pointValue: template.pointValue,
+        statBlock: {
+          armorClass: template.armorClass,
+          hitPoints: template.hitPoints,
+          initiativeModifier: template.initiativeModifier,
+          attackModifier: template.attackModifier,
+          damageDiceCount: template.damageDiceCount,
+          damageDieSides: template.damageDieSides,
+          damageModifier: template.damageModifier,
+        },
+        aiProfile: {},
+        rewards: {},
+        contentVersion: crawlerContentVersion,
+      });
+    }
+  }
+
+  if (existingLoot.length === 0) {
+    for (const template of starterLootTemplates) {
+      await upsertLootTemplate({
+        templateKey: template.key,
+        displayName: template.name,
+        categoryKey: template.category,
+        rarityKey: template.rarity,
+        equipmentSlot: lootEquipmentSlot(template),
+        isPermanent: template.isPermanent,
+        effectData: {
+          summary: template.effectSummary,
+        },
+        dropRules: {},
+        contentVersion: crawlerContentVersion,
+      });
+    }
+  }
+
+  crawlerContentSeeded = true;
+}
+
 function formatPartyLobby(
   party: PartyRecord,
   members: PartyMemberDetailRecord[],
@@ -206,9 +301,9 @@ function formatPartyLobby(
 function roomActionLabel(roomType: RunRoomDetailRecord["room_type"]) {
   switch (roomType) {
     case "combat":
-      return "Advance";
+      return "Engage Foes";
     case "elite_combat":
-      return "Press Forward";
+      return "Engage Elite";
     case "treasure":
       return "Open Cache";
     case "event":
@@ -218,6 +313,185 @@ function roomActionLabel(roomType: RunRoomDetailRecord["room_type"]) {
     case "boss":
       return "Confront Boss";
   }
+}
+
+function isEncounterRoom(roomType: RunRoomDetailRecord["room_type"]) {
+  return roomType === "combat" || roomType === "elite_combat" || roomType === "boss";
+}
+
+function toPlayerEncounterParticipant(
+  member: PartyMemberDetailRecord,
+  character: CharacterRecord,
+  slot: number,
+): EncounterParticipant {
+  const derived = character.derived_stats as { maxHp?: number; armorClass?: number; initiativeMod?: number };
+  const defaultProfile: Pick<
+    EncounterParticipant,
+    "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
+  > = {
+    attackModifier: 5,
+    damageDiceCount: 1,
+    damageDieSides: 8,
+    damageModifier: 3,
+  };
+
+  const profileByClass: Record<
+    string,
+    Pick<EncounterParticipant, "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier">
+  > = {
+    fighter: defaultProfile,
+    rogue: { attackModifier: 5, damageDiceCount: 1, damageDieSides: 8, damageModifier: 3 },
+    wizard: { attackModifier: 5, damageDiceCount: 1, damageDieSides: 10, damageModifier: 0 },
+    cleric: { attackModifier: 5, damageDiceCount: 1, damageDieSides: 8, damageModifier: 3 },
+  };
+  const profile: Pick<
+    EncounterParticipant,
+    "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
+  > = profileByClass[character.class_key] ?? defaultProfile;
+
+  return {
+    id: `player-${slot}-${character.id}`,
+    name: character.name,
+    side: "player",
+    initiativeModifier: derived.initiativeMod ?? 0,
+    armorClass: derived.armorClass ?? 10,
+    hitPoints: derived.maxHp ?? 1,
+    maxHitPoints: derived.maxHp ?? 1,
+    attackModifier: profile.attackModifier,
+    damageDiceCount: profile.damageDiceCount,
+    damageDieSides: profile.damageDieSides,
+    damageModifier: profile.damageModifier,
+  };
+}
+
+function toMonsterEncounterParticipant(
+  template: MonsterTemplateSeed,
+  slot: number,
+): EncounterParticipant {
+  return {
+    id: `monster-${slot}-${template.key}`,
+    name: template.name,
+    side: "monster",
+    initiativeModifier: template.initiativeModifier,
+    armorClass: template.armorClass,
+    hitPoints: template.hitPoints,
+    maxHitPoints: template.hitPoints,
+    attackModifier: template.attackModifier,
+    damageDiceCount: template.damageDiceCount,
+    damageDieSides: template.damageDieSides,
+    damageModifier: template.damageModifier,
+  };
+}
+
+function formatEncounterLog(events: EncounterEvent[]) {
+  return events.map((event) => `- ${event.summary}`);
+}
+
+type GrantedRewardSummary = {
+  rewardRows: RunRewardRecord[];
+  summaryLines: string[];
+};
+
+function summarizeRewardRows(rewardRows: RunRewardRecord[]) {
+  const byRecipient = new Map<string, string[]>();
+
+  for (const row of rewardRows) {
+    const recipientName = typeof row.reward_payload.recipientName === "string"
+      ? row.reward_payload.recipientName
+      : "Unknown adventurer";
+    const itemName = typeof row.reward_payload.itemName === "string"
+      ? row.reward_payload.itemName
+      : "Unknown reward";
+    const quantity = typeof row.reward_payload.quantity === "number" ? row.reward_payload.quantity : row.quantity;
+    const label = quantity > 1 ? `${itemName} x${quantity}` : itemName;
+
+    const existing = byRecipient.get(recipientName) ?? [];
+    existing.push(label);
+    byRecipient.set(recipientName, existing);
+  }
+
+  return [...byRecipient.entries()].map(([recipientName, rewards]) => `- ${recipientName}: ${rewards.join(", ")}`);
+}
+
+function formatEncounterVictoryMessage(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  result: EncounterResolutionResult,
+  rewards: GrantedRewardSummary,
+  next: RunRoomDetailRecord | null,
+  memberCount: number,
+) {
+  const finalSummary = result.finalParticipants
+    .map((participant) => `${participant.name} ${participant.currentHitPoints}/${participant.maxHitPoints}`)
+    .join(" | ");
+
+  const lines = [
+    `Encounter Resolved: ${room.room_type.replaceAll("_", " ")}`,
+    "",
+    `Run ID: ${run.id}`,
+    `Theme: ${run.theme_key ?? "unknown"}`,
+    `Rounds: ${result.roundsCompleted}`,
+    `Final status: ${finalSummary}`,
+    "",
+    "Rewards",
+    ...(rewards.summaryLines.length > 0 ? rewards.summaryLines : ["- No rewards granted."]),
+    "",
+    "Combat Log",
+    ...formatEncounterLog(result.events),
+  ];
+
+  if (next) {
+    const prompt = next.prompt_payload as { title?: string; description?: string; roomType?: string };
+    lines.push("");
+    lines.push("Next Room");
+    lines.push(prompt.title ?? `Floor ${next.floor_number}, Room ${next.room_number}`);
+    lines.push(prompt.description ?? "A new chamber lies ahead.");
+    lines.push(`Room type: ${(prompt.roomType ?? next.room_type).replaceAll("_", " ")}`);
+
+    return {
+      text: lines.join("\n"),
+      replyMarkup: {
+        inline_keyboard: [[{
+          text: roomActionLabel(next.room_type),
+          callback_data: `crawler:run:proceed:${next.id}`,
+        }]],
+      },
+    } satisfies CrawlerOutboundMessage;
+  }
+
+  lines.push("");
+  lines.push(`The party of ${memberCount} clears the final chamber.`);
+
+  return {
+    text: lines.join("\n"),
+  } satisfies CrawlerOutboundMessage;
+}
+
+function formatEncounterDefeatMessage(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  result: EncounterResolutionResult,
+) {
+  const finalSummary = result.finalParticipants
+    .map((participant) => `${participant.name} ${participant.currentHitPoints}/${participant.maxHitPoints}`)
+    .join(" | ");
+
+  return {
+    text: [
+      "Encounter Lost",
+      "",
+      `Run ID: ${run.id}`,
+      `Theme: ${run.theme_key ?? "unknown"}`,
+      `Defeat in: Floor ${room.floor_number}, Room ${room.room_number}`,
+      `Rounds: ${result.roundsCompleted}`,
+      `Final status: ${finalSummary}`,
+      "",
+      "Combat Log",
+      ...formatEncounterLog(result.events),
+      "",
+      "The run has failed. Your character survives outside the run, but this expedition is over.",
+    ].join("\n"),
+  } satisfies CrawlerOutboundMessage;
 }
 
 function formatActiveRoomPrompt(
@@ -265,9 +539,62 @@ function formatRunCompleteMessage(run: AdventureRunRecord, room: RunRoomDetailRe
       `Party size: ${memberCount}`,
       "",
       `The party cleared Floor ${room.floor_number}, Room ${room.room_number} and emerged from the dungeon.`,
-      "This is the current C3 exploration loop endpoint. Encounters and rewards arrive in later slices.",
+      "The run is complete and any banked rewards remain in your inventory.",
     ].join("\n"),
   } satisfies CrawlerOutboundMessage;
+}
+
+function formatRunFailedMessage(run: AdventureRunRecord, room: RunRoomDetailRecord, memberCount: number) {
+  return {
+    text: [
+      "Crawler Run Failed",
+      "",
+      `Run ID: ${run.id}`,
+      `Theme: ${run.theme_key ?? "unknown"}`,
+      `Party size: ${memberCount}`,
+      "",
+      `The party fell in Floor ${room.floor_number}, Room ${room.room_number}.`,
+      run.failure_reason ?? "The expedition has ended in defeat.",
+    ].join("\n"),
+  } satisfies CrawlerOutboundMessage;
+}
+
+function formatInventoryMessage(
+  character: CharacterRecord,
+  inventoryItems: Awaited<ReturnType<typeof listInventoryItemsForCharacter>>,
+  lootTemplates: LootTemplateRecord[],
+): CrawlerOutboundMessage {
+  const lootById = new Map(lootTemplates.map((template) => [template.id, template]));
+
+  const lines = [
+    "Crawler Inventory",
+    "",
+    `Character: ${character.name} (${character.class_key})`,
+    "",
+  ];
+
+  if (inventoryItems.length === 0) {
+    lines.push("No crawler loot owned yet.");
+    lines.push("Win encounters in the dungeon to start banking rewards.");
+    return { text: lines.join("\n") };
+  }
+
+  for (const item of inventoryItems.slice(0, 20)) {
+    const template = item.loot_template_id ? lootById.get(item.loot_template_id) : null;
+    const name = template?.display_name ?? "Unknown item";
+    const quantity = item.quantity > 1 ? ` x${item.quantity}` : "";
+    const rarity = template?.rarity_key ? ` (${template.rarity_key})` : "";
+    lines.push(`- ${name}${quantity}${rarity} [${item.status}]`);
+  }
+
+  if (inventoryItems.length > 20) {
+    lines.push("");
+    lines.push(`Showing 20 of ${inventoryItems.length} items.`);
+  }
+
+  return {
+    text: lines.join("\n"),
+  };
 }
 
 async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string): Promise<CrawlerOutboundMessage> {
@@ -310,6 +637,10 @@ async function buildRunMessage(runId: string): Promise<CrawlerOutboundMessage> {
     return formatRunCompleteMessage(run, currentRoom, memberCount);
   }
 
+  if (run.status === "failed") {
+    return formatRunFailedMessage(run, currentRoom, memberCount);
+  }
+
   return formatActiveRoomPrompt(run, currentRoom, memberCount);
 }
 
@@ -350,6 +681,201 @@ async function persistGeneratedRun(runId: string, generated: GeneratedRun) {
 
     return left.room_number - right.room_number;
   });
+}
+
+async function buildPlayerParticipants(members: PartyMemberDetailRecord[]) {
+  const currentMembers = activeMembers(members);
+  const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
+
+  return currentMembers.flatMap((member, index) => {
+    const character = characters[index];
+
+    if (!character) {
+      return [];
+    }
+
+    return [toPlayerEncounterParticipant(member, character, index + 1)];
+  });
+}
+
+function buildMonsterParticipants(room: RunRoomDetailRecord) {
+  const payload = room.generation_payload as { encounterMonsterKeys?: unknown };
+  const monsterKeys = Array.isArray(payload.encounterMonsterKeys)
+    ? payload.encounterMonsterKeys.filter((value): value is string => typeof value === "string")
+    : [];
+
+  return monsterKeys.flatMap((key, index) => {
+    const template = getMonsterTemplateByKey(key);
+    return template ? [toMonsterEncounterParticipant(template, index + 1)] : [];
+  });
+}
+
+async function grantEncounterRewards(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  encounterId: string,
+  members: PartyMemberDetailRecord[],
+): Promise<GrantedRewardSummary> {
+  const currentMembers = activeMembers(members);
+  const existingRewards = await listRunRewardsForRoom(room.id);
+
+  if (existingRewards.length > 0) {
+    return {
+      rewardRows: existingRewards,
+      summaryLines: summarizeRewardRows(existingRewards),
+    };
+  }
+
+  await ensureCrawlerContent();
+
+  const lootTemplates = await listLootTemplates();
+  const lootByKey = new Map(lootTemplates.map((template) => [template.template_key, template]));
+  const rewardRoomType = room.room_type as "combat" | "elite_combat" | "boss";
+  const rewardSeeds = generateEncounterRewards(
+    `${run.seed}:${room.id}`,
+    rewardRoomType,
+    currentMembers.length,
+  );
+  const rewardRows: RunRewardRecord[] = [];
+
+  for (const rewardSeed of rewardSeeds) {
+    const member = currentMembers[rewardSeed.recipientSlot - 1];
+    const lootTemplate = lootByKey.get(rewardSeed.templateKey);
+
+    if (!member || !lootTemplate) {
+      continue;
+    }
+
+    const inventoryItem = await createInventoryItem({
+      userId: member.user_id,
+      characterId: member.character_id,
+      lootTemplateId: lootTemplate.id,
+      quantity: rewardSeed.quantity,
+      metadata: {
+        runId: run.id,
+        roomId: room.id,
+        encounterId,
+        source: "crawler_encounter_reward",
+      },
+    });
+
+    const rewardRow = await createRunReward({
+      runId: run.id,
+      roomId: room.id,
+      encounterId,
+      recipientUserId: member.user_id,
+      recipientCharacterId: member.character_id,
+      lootTemplateId: lootTemplate.id,
+      rewardKind: lootTemplate.category_key,
+      status: "granted",
+      quantity: rewardSeed.quantity,
+      rewardPayload: {
+        itemName: lootTemplate.display_name,
+        quantity: rewardSeed.quantity,
+        recipientName: member.character_name,
+        inventoryItemId: inventoryItem.id,
+      },
+    });
+
+    rewardRows.push(rewardRow);
+  }
+
+  if (rewardRows.length > 0) {
+    await createAuditLog({
+      actorType: "system",
+      action: "crawler_rewards_granted",
+      targetType: "run_room",
+      targetId: room.id,
+      metadata: {
+        runId: run.id,
+        encounterId,
+        rewardCount: rewardRows.length,
+        rewards: rewardRows.map((row) => row.reward_payload),
+      },
+    });
+  }
+
+  return {
+    rewardRows,
+    summaryLines: summarizeRewardRows(rewardRows),
+  };
+}
+
+async function resolveEncounterRoom(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  members: PartyMemberDetailRecord[],
+) {
+  await ensureCrawlerContent();
+  const playerParticipants = await buildPlayerParticipants(members);
+  const monsterParticipants = buildMonsterParticipants(room);
+  const participants = [...playerParticipants, ...monsterParticipants];
+  const result = resolveEncounter({
+    participants,
+  });
+
+  const monsterTemplatesByKey = new Map(
+    (await listMonsterTemplates()).map((template) => [template.template_key, template]),
+  );
+  const encounter = await createEncounter({
+    runId: run.id,
+    roomId: room.id,
+    status: "active",
+    encounterKey: `${room.room_type}:${room.template_key ?? "unknown"}`,
+    encounterSnapshot: {
+      roomType: room.room_type,
+      participants,
+    },
+  });
+
+  const participantIdByEngineId = new Map<string, string>();
+
+  for (const [index, participant] of participants.entries()) {
+    const finalState = result.finalParticipants.find((candidate) => candidate.id === participant.id);
+    const engineId = participant.id;
+    const isMonster = participant.side === "monster";
+    const monsterKey = isMonster ? engineId.replace(/^monster-\d+-/, "") : null;
+    const member = !isMonster ? members.find((candidate) => candidate.character_name === participant.name) : null;
+    const monsterTemplateId = monsterKey ? monsterTemplatesByKey.get(monsterKey)?.id ?? null : null;
+    const record = await createEncounterParticipant({
+      encounterId: encounter.id,
+      side: participant.side,
+      userId: member?.user_id ?? null,
+      characterId: member?.character_id ?? null,
+      monsterTemplateId,
+      slot: index + 1,
+      displayName: participant.name,
+      snapshot: {
+        ...participant,
+        monsterKey,
+      },
+      isDefeated: finalState?.isDefeated ?? false,
+    });
+    participantIdByEngineId.set(engineId, record.id);
+  }
+
+  for (const [index, event] of result.events.entries()) {
+    await createEncounterEvent({
+      encounterId: encounter.id,
+      sequenceNumber: index + 1,
+      roundNumber: "round" in event ? event.round : 0,
+      eventType: event.type,
+      actorParticipantId: "participantId" in event ? participantIdByEngineId.get(event.participantId) ?? null : null,
+      targetParticipantId: "targetId" in event ? participantIdByEngineId.get(event.targetId) ?? null : null,
+      publicText: event.summary,
+      payload: event as unknown as Record<string, unknown>,
+    });
+  }
+
+  await updateEncounter({
+    encounterId: encounter.id,
+    status: result.winningSide === "player" ? "completed" : "failed",
+  });
+
+  return {
+    encounterId: encounter.id,
+    result,
+  };
 }
 
 async function activateRoom(run: AdventureRunRecord, room: RunRoomDetailRecord) {
@@ -418,6 +944,37 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
     ].join("\n"),
     replyMarkup: createPartyButtons(),
   };
+}
+
+export async function handleInventoryCommand(actor: TelegramActor): Promise<CrawlerOutboundMessage> {
+  const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
+  await ensureCrawlerContent();
+
+  const character = await getEligibleCharacterByUserId(user.id);
+
+  if (!character) {
+    return {
+      text: [
+        "You need an active character before you can inspect crawler inventory.",
+        "",
+        "Create one in DM with /create_character first.",
+      ].join("\n"),
+    };
+  }
+
+  const [inventoryItems, lootTemplates] = await Promise.all([
+    listInventoryItemsForCharacter(character.id),
+    listLootTemplates(),
+  ]);
+
+  return formatInventoryMessage(character, inventoryItems, lootTemplates);
 }
 
 export async function handleCrawlerCallback(
@@ -760,15 +1317,96 @@ export async function handleCrawlerCallback(
       },
     });
 
+    const rooms = await listRunRoomDetails(run.id);
+    const next = nextRoom(rooms, currentRoom.id);
+    const members = await listPartyMemberDetails(party.id);
+    const memberCount = activeMembers(members).length;
+
+    if (isEncounterRoom(currentRoom.room_type)) {
+      const { encounterId, result } = await resolveEncounterRoom(run, currentRoom, members);
+
+      if (result.winningSide !== "player") {
+        await updateRunRoom({
+          roomId: currentRoom.id,
+          status: "failed",
+          resolved: true,
+        });
+        await updateAdventureRun({
+          runId: run.id,
+          status: "failed",
+          currentRoomId: currentRoom.id,
+          currentFloorNumber: currentRoom.floor_number,
+          summary: {
+            failedRoomId: currentRoom.id,
+            failedRoomType: currentRoom.room_type,
+          },
+        });
+        await updateParty({
+          partyId: party.id,
+          status: "completed",
+          activeRunId: null,
+        });
+
+        return {
+          alertText: "Encounter lost",
+          message: formatEncounterDefeatMessage((await getAdventureRunById(run.id)) ?? run, currentRoom, result),
+        };
+      }
+
+      const rewards = await grantEncounterRewards(run, currentRoom, encounterId, members);
+
+      await updateRunRoom({
+        roomId: currentRoom.id,
+        status: "completed",
+        resolved: true,
+      });
+
+      if (!next) {
+        await updateAdventureRun({
+          runId: run.id,
+          status: "completed",
+          currentRoomId: currentRoom.id,
+          currentFloorNumber: currentRoom.floor_number,
+        });
+        await updateParty({
+          partyId: party.id,
+          status: "completed",
+          activeRunId: null,
+        });
+
+        return {
+          alertText: "Run complete",
+          message: formatEncounterVictoryMessage(
+            (await getAdventureRunById(run.id)) ?? run,
+            currentRoom,
+            result,
+            rewards,
+            null,
+            memberCount,
+          ),
+        };
+      }
+
+      await activateRoom(run, next);
+
+      return {
+        alertText: "Encounter won",
+        message: formatEncounterVictoryMessage(
+          (await getAdventureRunById(run.id)) ?? run,
+          currentRoom,
+          result,
+          rewards,
+          next,
+          memberCount,
+        ),
+      };
+    }
+
     await updateRunRoom({
       roomId: currentRoom.id,
       status: "completed",
       resolved: true,
     });
-
-    const rooms = await listRunRoomDetails(run.id);
-    const next = nextRoom(rooms, currentRoom.id);
-    const memberCount = activeMembers(await listPartyMemberDetails(party.id)).length;
 
     if (!next) {
       await updateAdventureRun({

@@ -511,6 +511,7 @@ function helpText() {
     "/help",
     "/create_character",
     "/character",
+    "/inventory",
     "/delete_character",
     "/record",
     "/history",
@@ -523,7 +524,7 @@ function helpText() {
     "",
     "Group chats:",
     "- /start, /help, /status, /party, and /dispute work in groups",
-    "- character creation and sheet management should be done in DM",
+    "- character creation, inventory, and sheet management should be done in DM",
   ].join("\n");
 }
 

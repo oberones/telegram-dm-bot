@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildRoomWeightsForTheme,
   crawlerThemes,
+  generateEncounterRewards,
   generateRun,
   selectThemeFromSeed,
   starterLootTemplates,
@@ -44,4 +45,12 @@ test("generateRun starts with a combat room and ends with a boss room", () => {
 
   assert.equal(allRooms[0]?.roomType, "combat");
   assert.equal(allRooms.at(-1)?.roomType, "boss");
+});
+
+test("generateEncounterRewards is deterministic for a given seed", () => {
+  const first = generateEncounterRewards("reward-seed", "elite_combat", 2);
+  const second = generateEncounterRewards("reward-seed", "elite_combat", 2);
+
+  assert.deepEqual(first, second);
+  assert.equal(first.length, 4);
 });

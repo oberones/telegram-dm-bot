@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { handleCrawlerCallback, handlePartyCommand } from "@dm-bot/crawler-domain";
+import { handleCrawlerCallback, handleInventoryCommand, handlePartyCommand } from "@dm-bot/crawler-domain";
 
 import {
   handleCallback,
@@ -43,6 +43,7 @@ type TelegramUpdateDeps = {
   handleReplyDisputeCommand: typeof handleReplyDisputeCommand;
   handleTextMessage: typeof handleTextMessage;
   handlePartyCommand: typeof handlePartyCommand;
+  handleInventoryCommand: typeof handleInventoryCommand;
   handleCrawlerCallback: typeof handleCrawlerCallback;
 };
 
@@ -65,6 +66,7 @@ const defaultDeps: TelegramUpdateDeps = {
   handleReplyDisputeCommand,
   handleTextMessage,
   handlePartyCommand,
+  handleInventoryCommand,
   handleCrawlerCallback,
 };
 
@@ -182,6 +184,18 @@ export async function processTelegramUpdate(
     }
 
     await app.telegram.sendMessage(chatId, await deps.handleCharacter(actor));
+    return;
+  }
+
+  if (normalizedCommand === "/inventory") {
+    if (!isPrivateChat) {
+      await app.telegram.sendMessage(chatId, {
+        text: "Crawler inventory is shown in DM right now. Open a private chat with the bot and send /inventory there.",
+      });
+      return;
+    }
+
+    await app.telegram.sendMessage(chatId, await deps.handleInventoryCommand(actor));
     return;
   }
 

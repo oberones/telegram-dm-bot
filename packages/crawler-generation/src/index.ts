@@ -14,6 +14,13 @@ export type MonsterTemplateSeed = {
   themeKey: CrawlerThemeKey | "shared";
   role: "minion" | "brute" | "skirmisher" | "caster" | "support" | "elite" | "boss";
   pointValue: number;
+  armorClass: number;
+  hitPoints: number;
+  initiativeModifier: number;
+  attackModifier: number;
+  damageDiceCount: number;
+  damageDieSides: number;
+  damageModifier: number;
 };
 
 export type LootTemplateSeed = {
@@ -22,7 +29,14 @@ export type LootTemplateSeed = {
   category: "weapon" | "armor" | "accessory" | "consumable" | "currency";
   rarity: "common" | "uncommon" | "rare";
   effectSummary: string;
+  equipmentSlot?: "weapon" | "armor" | "accessory";
   isPermanent: boolean;
+};
+
+export type EncounterRewardSeed = {
+  recipientSlot: number;
+  templateKey: string;
+  quantity: number;
 };
 
 export type RoomWeightTable = Record<CrawlerRoomType, number>;
@@ -82,16 +96,16 @@ export const crawlerThemes: ThemeDefinition[] = [
 ];
 
 export const starterMonsterTemplates: MonsterTemplateSeed[] = [
-  { key: "goblin_sneak", name: "Goblin Sneak", themeKey: "goblin_warrens", role: "skirmisher", pointValue: 0.5 },
-  { key: "warg", name: "Warg", themeKey: "goblin_warrens", role: "brute", pointValue: 1.0 },
-  { key: "goblin_boss", name: "Goblin Boss", themeKey: "goblin_warrens", role: "elite", pointValue: 1.5 },
-  { key: "skeleton_guard", name: "Skeleton Guard", themeKey: "forsaken_crypt", role: "brute", pointValue: 1.0 },
-  { key: "restless_dead", name: "Restless Dead", themeKey: "forsaken_crypt", role: "support", pointValue: 0.75 },
-  { key: "bone_warden", name: "Bone Warden", themeKey: "forsaken_crypt", role: "boss", pointValue: 3.0 },
-  { key: "animated_armor", name: "Animated Armor", themeKey: "arcane_ruins", role: "brute", pointValue: 1.0 },
-  { key: "arc_spark", name: "Arc Spark", themeKey: "arcane_ruins", role: "caster", pointValue: 0.75 },
-  { key: "collapsed_magus", name: "Collapsed Magus", themeKey: "arcane_ruins", role: "boss", pointValue: 3.0 },
-  { key: "giant_rat", name: "Giant Rat", themeKey: "shared", role: "minion", pointValue: 0.5 },
+  { key: "goblin_sneak", name: "Goblin Sneak", themeKey: "goblin_warrens", role: "skirmisher", pointValue: 0.5, armorClass: 13, hitPoints: 7, initiativeModifier: 2, attackModifier: 4, damageDiceCount: 1, damageDieSides: 6, damageModifier: 2 },
+  { key: "warg", name: "Warg", themeKey: "goblin_warrens", role: "brute", pointValue: 1.0, armorClass: 13, hitPoints: 11, initiativeModifier: 2, attackModifier: 5, damageDiceCount: 2, damageDieSides: 4, damageModifier: 2 },
+  { key: "goblin_boss", name: "Goblin Boss", themeKey: "goblin_warrens", role: "elite", pointValue: 1.5, armorClass: 15, hitPoints: 18, initiativeModifier: 1, attackModifier: 5, damageDiceCount: 1, damageDieSides: 8, damageModifier: 3 },
+  { key: "skeleton_guard", name: "Skeleton Guard", themeKey: "forsaken_crypt", role: "brute", pointValue: 1.0, armorClass: 14, hitPoints: 13, initiativeModifier: 0, attackModifier: 4, damageDiceCount: 1, damageDieSides: 6, damageModifier: 2 },
+  { key: "restless_dead", name: "Restless Dead", themeKey: "forsaken_crypt", role: "support", pointValue: 0.75, armorClass: 12, hitPoints: 10, initiativeModifier: 0, attackModifier: 3, damageDiceCount: 1, damageDieSides: 6, damageModifier: 1 },
+  { key: "bone_warden", name: "Bone Warden", themeKey: "forsaken_crypt", role: "boss", pointValue: 3.0, armorClass: 15, hitPoints: 24, initiativeModifier: 1, attackModifier: 6, damageDiceCount: 1, damageDieSides: 10, damageModifier: 3 },
+  { key: "animated_armor", name: "Animated Armor", themeKey: "arcane_ruins", role: "brute", pointValue: 1.0, armorClass: 16, hitPoints: 16, initiativeModifier: 0, attackModifier: 5, damageDiceCount: 1, damageDieSides: 6, damageModifier: 2 },
+  { key: "arc_spark", name: "Arc Spark", themeKey: "arcane_ruins", role: "caster", pointValue: 0.75, armorClass: 12, hitPoints: 8, initiativeModifier: 2, attackModifier: 5, damageDiceCount: 1, damageDieSides: 8, damageModifier: 1 },
+  { key: "collapsed_magus", name: "Collapsed Magus", themeKey: "arcane_ruins", role: "boss", pointValue: 3.0, armorClass: 14, hitPoints: 22, initiativeModifier: 2, attackModifier: 6, damageDiceCount: 2, damageDieSides: 6, damageModifier: 2 },
+  { key: "giant_rat", name: "Giant Rat", themeKey: "shared", role: "minion", pointValue: 0.5, armorClass: 11, hitPoints: 4, initiativeModifier: 1, attackModifier: 3, damageDiceCount: 1, damageDieSides: 4, damageModifier: 1 },
 ];
 
 export const starterLootTemplates: LootTemplateSeed[] = [
@@ -101,6 +115,7 @@ export const starterLootTemplates: LootTemplateSeed[] = [
     category: "weapon",
     rarity: "common",
     effectSummary: "+1 melee attack rolls for martial characters",
+    equipmentSlot: "weapon",
     isPermanent: true,
   },
   {
@@ -109,6 +124,7 @@ export const starterLootTemplates: LootTemplateSeed[] = [
     category: "weapon",
     rarity: "common",
     effectSummary: "+1 spell attack rolls",
+    equipmentSlot: "weapon",
     isPermanent: true,
   },
   {
@@ -117,6 +133,7 @@ export const starterLootTemplates: LootTemplateSeed[] = [
     category: "armor",
     rarity: "common",
     effectSummary: "+1 AC for eligible wearers",
+    equipmentSlot: "armor",
     isPermanent: true,
   },
   {
@@ -125,6 +142,7 @@ export const starterLootTemplates: LootTemplateSeed[] = [
     category: "accessory",
     rarity: "common",
     effectSummary: "+2 max HP",
+    equipmentSlot: "accessory",
     isPermanent: true,
   },
   {
@@ -145,7 +163,7 @@ export const starterLootTemplates: LootTemplateSeed[] = [
   },
 ];
 
-const generationVersion = "crawler-v1-prototype";
+export const crawlerContentVersion = "crawler-v1-prototype";
 
 const roomTemplateByType: Record<CrawlerRoomType, string[]> = {
   combat: ["ambush", "hallway_clash", "guard_post"],
@@ -215,6 +233,7 @@ export function generateRun(seed: string): GeneratedRun {
           floorNumber,
           roomNumber,
           roomType,
+          encounterMonsterKeys: buildEncounterMonsterKeys(theme.key, roomType, rng),
         },
       });
     }
@@ -232,7 +251,7 @@ export function generateRun(seed: string): GeneratedRun {
 
   return {
     seed,
-    generationVersion,
+    generationVersion: crawlerContentVersion,
     theme,
     floorCount,
     floors,
@@ -300,6 +319,111 @@ function pickRoomType(
 function pickRoomTemplate(rng: () => number, roomType: CrawlerRoomType) {
   const templates = roomTemplateByType[roomType];
   return templates[Math.floor(rng() * templates.length)] ?? templates[0]!;
+}
+
+export function getMonsterTemplateByKey(key: string) {
+  return starterMonsterTemplates.find((template) => template.key === key) ?? null;
+}
+
+export function getLootTemplateByKey(key: string) {
+  return starterLootTemplates.find((template) => template.key === key) ?? null;
+}
+
+export function generateEncounterRewards(
+  seed: string,
+  roomType: Extract<CrawlerRoomType, "combat" | "elite_combat" | "boss">,
+  recipientCount: number,
+): EncounterRewardSeed[] {
+  const rng = createRng(seed);
+  const rewards: EncounterRewardSeed[] = [];
+  const permanentPool = starterLootTemplates.filter((template) => template.isPermanent);
+
+  for (let recipientSlot = 1; recipientSlot <= recipientCount; recipientSlot += 1) {
+    if (roomType === "combat") {
+      rewards.push({
+        recipientSlot,
+        templateKey: "gold",
+        quantity: 10,
+      });
+      continue;
+    }
+
+    const permanentIndex = Math.floor(rng() * permanentPool.length);
+    const permanent = permanentPool[permanentIndex] ?? permanentPool[0];
+
+    rewards.push({
+      recipientSlot,
+      templateKey: "gold",
+      quantity: roomType === "boss" ? 30 : 15,
+    });
+
+    if (permanent) {
+      rewards.push({
+        recipientSlot,
+        templateKey: permanent.key,
+        quantity: 1,
+      });
+    }
+  }
+
+  return rewards;
+}
+
+function buildEncounterMonsterKeys(
+  themeKey: CrawlerThemeKey,
+  roomType: CrawlerRoomType,
+  rng: () => number,
+) {
+  if (!["combat", "elite_combat", "boss"].includes(roomType)) {
+    return [] as string[];
+  }
+
+  const themeMonsters = starterMonsterTemplates.filter((template) => template.themeKey === themeKey);
+  const normalMonsters = themeMonsters.filter((template) => ["minion", "brute", "skirmisher", "caster", "support"].includes(template.role));
+  const eliteMonsters = themeMonsters.filter((template) => template.role === "elite");
+  const bossMonsters = themeMonsters.filter((template) => template.role === "boss");
+
+  if (roomType === "boss") {
+    return [bossMonsters[0]?.key ?? normalMonsters[0]?.key ?? "giant_rat"];
+  }
+
+  if (roomType === "elite_combat") {
+    if (eliteMonsters[0]) {
+      return [eliteMonsters[0].key];
+    }
+
+    return pickDistinctMonsterKeys(normalMonsters, rng, 2);
+  }
+
+  const count = rng() > 0.6 ? 2 : 1;
+  return pickDistinctMonsterKeys(normalMonsters, rng, count);
+}
+
+function pickDistinctMonsterKeys(
+  monsters: MonsterTemplateSeed[],
+  rng: () => number,
+  count: number,
+) {
+  if (monsters.length === 0) {
+    return ["giant_rat"];
+  }
+
+  const pool = [...monsters];
+  const selected: string[] = [];
+
+  while (selected.length < count && pool.length > 0) {
+    const index = Math.floor(rng() * pool.length);
+    const [picked] = pool.splice(index, 1);
+    if (picked) {
+      selected.push(picked.key);
+    }
+  }
+
+  if (selected.length === 0) {
+    selected.push(monsters[0]!.key);
+  }
+
+  return selected;
 }
 
 function createRng(seed: string) {

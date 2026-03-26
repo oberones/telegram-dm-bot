@@ -349,6 +349,48 @@ export type RunChoiceRecord = {
   created_at: Date;
 };
 
+export type EncounterRecord = {
+  id: string;
+  run_id: string;
+  room_id: string;
+  status: "queued" | "active" | "completed" | "failed" | "cancelled" | "error";
+  encounter_key: string;
+  encounter_snapshot: Record<string, unknown>;
+  started_at: Date | null;
+  completed_at: Date | null;
+  errored_at: Date | null;
+  error_summary: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type EncounterParticipantRecord = {
+  id: string;
+  encounter_id: string;
+  side: "player" | "monster";
+  user_id: string | null;
+  character_id: string | null;
+  monster_template_id: string | null;
+  slot: number;
+  display_name: string;
+  snapshot: Record<string, unknown>;
+  is_defeated: boolean;
+  created_at: Date;
+};
+
+export type EncounterEventRecord = {
+  id: string;
+  encounter_id: string;
+  sequence_number: number;
+  round_number: number;
+  event_type: string;
+  actor_participant_id: string | null;
+  target_participant_id: string | null;
+  public_text: string | null;
+  payload: Record<string, unknown>;
+  created_at: Date;
+};
+
 export type MonsterTemplateRecord = {
   id: string;
   template_key: string;
@@ -388,6 +430,23 @@ export type InventoryItemRecord = {
   acquired_at: Date;
   consumed_at: Date | null;
   lost_at: Date | null;
+};
+
+export type RunRewardRecord = {
+  id: string;
+  run_id: string;
+  room_id: string | null;
+  encounter_id: string | null;
+  recipient_user_id: string | null;
+  recipient_character_id: string | null;
+  loot_template_id: string | null;
+  reward_kind: string;
+  status: "pending" | "granted" | "revoked";
+  quantity: number;
+  reward_payload: Record<string, unknown>;
+  granted_at: Date | null;
+  revoked_at: Date | null;
+  created_at: Date;
 };
 
 type TelegramUserInput = {
@@ -450,6 +509,14 @@ type RunRoomInput = {
   generationPayload?: Record<string, unknown>;
 };
 
+type EncounterInput = {
+  runId: string;
+  roomId: string;
+  status?: EncounterRecord["status"];
+  encounterKey: string;
+  encounterSnapshot: Record<string, unknown>;
+};
+
 type MonsterTemplateInput = {
   templateKey: string;
   displayName: string;
@@ -480,6 +547,19 @@ type InventoryItemInput = {
   lootTemplateId?: string | null;
   quantity?: number;
   metadata?: Record<string, unknown>;
+};
+
+type RunRewardInput = {
+  runId: string;
+  roomId?: string | null;
+  encounterId?: string | null;
+  recipientUserId?: string | null;
+  recipientCharacterId?: string | null;
+  lootTemplateId?: string | null;
+  rewardKind: string;
+  status?: RunRewardRecord["status"];
+  quantity?: number;
+  rewardPayload?: Record<string, unknown>;
 };
 
 type CreateDisputeInput = {
@@ -555,6 +635,36 @@ export async function getActiveCharacterByUserId(userId: string): Promise<Charac
         LIMIT 1
       `,
       [userId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function getCharacterById(characterId: string): Promise<CharacterRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<CharacterRecord>(
+      `
+        SELECT
+          id,
+          user_id,
+          name,
+          class_key,
+          level,
+          status,
+          rules_version_id,
+          wins,
+          losses,
+          matches_played,
+          derived_stats,
+          ability_scores,
+          loadout,
+          resource_state
+        FROM characters
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [characterId],
     );
 
     return result.rows[0] ?? null;
@@ -2517,6 +2627,153 @@ export async function createRunChoice(params: {
   });
 }
 
+export async function createEncounter(input: EncounterInput): Promise<EncounterRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterRecord>(
+      `
+        INSERT INTO encounters (
+          run_id,
+          room_id,
+          status,
+          encounter_key,
+          encounter_snapshot,
+          started_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3::encounter_status,
+          $4,
+          $5,
+          CASE WHEN $3::encounter_status = 'active'::encounter_status THEN NOW() ELSE NULL END
+        )
+        RETURNING *
+      `,
+      [
+        input.runId,
+        input.roomId,
+        input.status ?? "queued",
+        input.encounterKey,
+        input.encounterSnapshot,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function updateEncounter(params: {
+  encounterId: string;
+  status?: EncounterRecord["status"];
+  errorSummary?: string | null;
+}): Promise<EncounterRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterRecord>(
+      `
+        UPDATE encounters
+        SET
+          status = COALESCE($2, status),
+          completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
+          errored_at = CASE WHEN $2 = 'error' THEN NOW() ELSE errored_at END,
+          error_summary = COALESCE($3, error_summary),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [params.encounterId, params.status ?? null, params.errorSummary ?? null],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function createEncounterParticipant(params: {
+  encounterId: string;
+  side: EncounterParticipantRecord["side"];
+  userId?: string | null;
+  characterId?: string | null;
+  monsterTemplateId?: string | null;
+  slot: number;
+  displayName: string;
+  snapshot: Record<string, unknown>;
+  isDefeated?: boolean;
+}): Promise<EncounterParticipantRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterParticipantRecord>(
+      `
+        INSERT INTO encounter_participants (
+          encounter_id,
+          side,
+          user_id,
+          character_id,
+          monster_template_id,
+          slot,
+          display_name,
+          snapshot,
+          is_defeated
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [
+        params.encounterId,
+        params.side,
+        params.userId ?? null,
+        params.characterId ?? null,
+        params.monsterTemplateId ?? null,
+        params.slot,
+        params.displayName,
+        params.snapshot,
+        params.isDefeated ?? false,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function createEncounterEvent(params: {
+  encounterId: string;
+  sequenceNumber: number;
+  roundNumber: number;
+  eventType: string;
+  actorParticipantId?: string | null;
+  targetParticipantId?: string | null;
+  publicText?: string | null;
+  payload: Record<string, unknown>;
+}): Promise<EncounterEventRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterEventRecord>(
+      `
+        INSERT INTO encounter_events (
+          encounter_id,
+          sequence_number,
+          round_number,
+          event_type,
+          actor_participant_id,
+          target_participant_id,
+          public_text,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+      `,
+      [
+        params.encounterId,
+        params.sequenceNumber,
+        params.roundNumber,
+        params.eventType,
+        params.actorParticipantId ?? null,
+        params.targetParticipantId ?? null,
+        params.publicText ?? null,
+        params.payload,
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
 export async function upsertMonsterTemplate(input: MonsterTemplateInput): Promise<MonsterTemplateRecord> {
   return withTransaction(async (client) => {
     const result = await client.query<MonsterTemplateRecord>(
@@ -2676,6 +2933,88 @@ export async function listInventoryItemsForCharacter(characterId: string): Promi
         ORDER BY acquired_at DESC
       `,
       [characterId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function listInventoryItemsForUser(userId: string): Promise<InventoryItemRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<InventoryItemRecord>(
+      `
+        SELECT *
+        FROM inventory_items
+        WHERE user_id = $1
+        ORDER BY acquired_at DESC, id DESC
+      `,
+      [userId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function createRunReward(input: RunRewardInput): Promise<RunRewardRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRewardRecord>(
+      `
+        INSERT INTO run_rewards (
+          run_id,
+          room_id,
+          encounter_id,
+          recipient_user_id,
+          recipient_character_id,
+          loot_template_id,
+          reward_kind,
+          status,
+          quantity,
+          reward_payload,
+          granted_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8::loot_grant_status,
+          $9,
+          $10,
+          CASE WHEN $8::loot_grant_status = 'granted'::loot_grant_status THEN NOW() ELSE NULL END
+        )
+        RETURNING *
+      `,
+      [
+        input.runId,
+        input.roomId ?? null,
+        input.encounterId ?? null,
+        input.recipientUserId ?? null,
+        input.recipientCharacterId ?? null,
+        input.lootTemplateId ?? null,
+        input.rewardKind,
+        input.status ?? "pending",
+        input.quantity ?? 1,
+        input.rewardPayload ?? {},
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listRunRewardsForRoom(roomId: string): Promise<RunRewardRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRewardRecord>(
+      `
+        SELECT *
+        FROM run_rewards
+        WHERE room_id = $1
+        ORDER BY created_at ASC, id ASC
+      `,
+      [roomId],
     );
 
     return result.rows;
