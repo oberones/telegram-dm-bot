@@ -1591,6 +1591,18 @@ export async function handleCrawlerCallback(
       };
     }
 
+    if (run.status !== "awaiting_choice") {
+      return {
+        alertText: "That run is no longer awaiting input",
+      };
+    }
+
+    if (currentRoom.status !== "active" || currentRoom.resolved_at) {
+      return {
+        alertText: "That room has already been resolved",
+      };
+    }
+
     await createRunChoice({
       runId: run.id,
       roomId: currentRoom.id,
