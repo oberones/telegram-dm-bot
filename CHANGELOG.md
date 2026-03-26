@@ -1,3 +1,9 @@
+## 0.22.0 (2026-03-26)
+
+### Feat
+
+- add equipment and loot to admin panel
+
 ## 0.21.0 (2026-03-26)
 
 ### Feat
