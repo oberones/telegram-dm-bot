@@ -2948,6 +2948,72 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<In
   });
 }
 
+export async function upsertOwnedInventoryStack(input: InventoryItemInput): Promise<InventoryItemRecord> {
+  return withTransaction(async (client) => {
+    const existing = await client.query<InventoryItemRecord>(
+      `
+        SELECT *
+        FROM inventory_items
+        WHERE user_id = $1
+          AND character_id IS NOT DISTINCT FROM $2
+          AND loot_template_id IS NOT DISTINCT FROM $3
+          AND status = 'owned'::inventory_item_status
+        ORDER BY acquired_at ASC, id ASC
+        LIMIT 1
+      `,
+      [
+        input.userId,
+        input.characterId ?? null,
+        input.lootTemplateId ?? null,
+      ],
+    );
+
+    if (existing.rows[0]) {
+      const updated = await client.query<InventoryItemRecord>(
+        `
+          UPDATE inventory_items
+          SET
+            quantity = quantity + $2,
+            metadata = metadata || $3::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [
+          existing.rows[0].id,
+          input.quantity ?? 1,
+          JSON.stringify(input.metadata ?? {}),
+        ],
+      );
+
+      return updated.rows[0]!;
+    }
+
+    const created = await client.query<InventoryItemRecord>(
+      `
+        INSERT INTO inventory_items (
+          user_id,
+          character_id,
+          loot_template_id,
+          quantity,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `,
+      [
+        input.userId,
+        input.characterId ?? null,
+        input.lootTemplateId ?? null,
+        input.quantity ?? 1,
+        input.metadata ?? {},
+      ],
+    );
+
+    return created.rows[0]!;
+  });
+}
+
 export async function getInventoryItemById(itemId: string): Promise<InventoryItemRecord | null> {
   return withTransaction(async (client) => {
     const result = await client.query<InventoryItemRecord>(

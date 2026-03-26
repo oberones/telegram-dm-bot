@@ -40,6 +40,7 @@ import {
   updateInventoryItemStatus,
   updateParty,
   updateRunRoom,
+  upsertOwnedInventoryStack,
   upsertLootTemplate,
   upsertMonsterTemplate,
   upsertTelegramUser,
@@ -484,6 +485,32 @@ function consumableEffectForTemplateKey(templateKey: string): RunEffectRecord | 
   }
 
   return null;
+}
+
+async function grantInventoryReward(params: {
+  userId: string;
+  characterId: string;
+  lootTemplate: LootTemplateRecord;
+  quantity: number;
+  metadata: Record<string, unknown>;
+}) {
+  if (params.lootTemplate.category_key === "currency") {
+    return upsertOwnedInventoryStack({
+      userId: params.userId,
+      characterId: params.characterId,
+      lootTemplateId: params.lootTemplate.id,
+      quantity: params.quantity,
+      metadata: params.metadata,
+    });
+  }
+
+  return createInventoryItem({
+    userId: params.userId,
+    characterId: params.characterId,
+    lootTemplateId: params.lootTemplate.id,
+    quantity: params.quantity,
+    metadata: params.metadata,
+  });
 }
 
 function toPlayerEncounterParticipant(
@@ -1081,10 +1108,10 @@ async function grantEncounterRewards(
       continue;
     }
 
-    const inventoryItem = await createInventoryItem({
+    const inventoryItem = await grantInventoryReward({
       userId: member.user_id,
       characterId: member.character_id,
-      lootTemplateId: lootTemplate.id,
+      lootTemplate,
       quantity: rewardSeed.quantity,
       metadata: {
         runId: run.id,
@@ -1171,10 +1198,10 @@ async function grantRoomRewards(
       continue;
     }
 
-    const inventoryItem = await createInventoryItem({
+    const inventoryItem = await grantInventoryReward({
       userId: member.user_id,
       characterId: member.character_id,
-      lootTemplateId: lootTemplate.id,
+      lootTemplate,
       quantity: rewardSeed.quantity,
       metadata: {
         runId: run.id,
