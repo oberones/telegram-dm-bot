@@ -1,3 +1,9 @@
+## 0.25.0 (2026-03-26)
+
+### Feat
+
+- add the ability to resume a run with /run command
+
 ## 0.24.0 (2026-03-26)
 
 ### Feat
