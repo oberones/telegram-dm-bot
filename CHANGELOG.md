@@ -1,3 +1,9 @@
+## 0.16.1 (2026-03-25)
+
+### Fix
+
+- more output enhancements
+
 ## 0.16.0 (2026-03-25)
 
 ### Feat
