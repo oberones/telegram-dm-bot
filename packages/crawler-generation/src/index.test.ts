@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildRoomWeightsForTheme,
   crawlerThemes,
+  generateRun,
   selectThemeFromSeed,
   starterLootTemplates,
   starterMonsterTemplates,
@@ -28,4 +29,19 @@ test("theme room weights stay non-negative", () => {
   for (const value of Object.values(weights)) {
     assert.ok(value >= 0);
   }
+});
+
+test("generateRun is deterministic for a given seed", () => {
+  const first = generateRun("seed-alpha");
+  const second = generateRun("seed-alpha");
+
+  assert.deepEqual(first, second);
+});
+
+test("generateRun starts with a combat room and ends with a boss room", () => {
+  const generated = generateRun("seed-beta");
+  const allRooms = generated.floors.flatMap((floor) => floor.rooms);
+
+  assert.equal(allRooms[0]?.roomType, "combat");
+  assert.equal(allRooms.at(-1)?.roomType, "boss");
 });

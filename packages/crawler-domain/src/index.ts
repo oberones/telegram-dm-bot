@@ -5,22 +5,32 @@ import {
   createAdventureRun,
   createAuditLog,
   createParty,
+  createRunChoice,
+  createRunFloor,
+  createRunRoom,
   ensureRulesVersion,
   getActivePartyForUser,
+  getAdventureRunById,
   getEligibleCharacterByUserId,
   getPartyById,
   getPartyMemberByPartyAndUser,
+  getRunRoomDetailById,
   getUserById,
   listPartyMemberDetails,
-  setPartyMemberStatus,
+  listRunRoomDetails,
   setPartyMemberLeft,
   setPartyMemberReadyState,
+  setPartyMemberStatus,
+  updateAdventureRun,
   updateParty,
+  updateRunRoom,
   upsertTelegramUser,
+  type AdventureRunRecord,
   type PartyMemberDetailRecord,
   type PartyRecord,
+  type RunRoomDetailRecord,
 } from "@dm-bot/db";
-import { selectThemeFromSeed } from "@dm-bot/crawler-generation";
+import { generateRun, type GeneratedRun, type GeneratedRoom } from "@dm-bot/crawler-generation";
 
 export type CrawlerOutboundMessage = {
   text: string;
@@ -193,6 +203,73 @@ function formatPartyLobby(
   } satisfies CrawlerOutboundMessage;
 }
 
+function roomActionLabel(roomType: RunRoomDetailRecord["room_type"]) {
+  switch (roomType) {
+    case "combat":
+      return "Advance";
+    case "elite_combat":
+      return "Press Forward";
+    case "treasure":
+      return "Open Cache";
+    case "event":
+      return "Investigate";
+    case "rest":
+      return "Take Rest";
+    case "boss":
+      return "Confront Boss";
+  }
+}
+
+function formatActiveRoomPrompt(
+  run: AdventureRunRecord,
+  room: RunRoomDetailRecord,
+  memberCount: number,
+) {
+  const prompt = room.prompt_payload as {
+    title?: string;
+    description?: string;
+    roomType?: string;
+    templateKey?: string;
+  };
+
+  const lines = [
+    "Crawler Run",
+    "",
+    `Run ID: ${run.id}`,
+    `Theme: ${run.theme_key ?? "unknown"}`,
+    `Party size: ${memberCount}`,
+    "",
+    prompt.title ?? `Floor ${room.floor_number}, Room ${room.room_number}`,
+    prompt.description ?? "A new chamber lies ahead.",
+    `Room type: ${(prompt.roomType ?? room.room_type).replaceAll("_", " ")}`,
+  ];
+
+  return {
+    text: lines.join("\n"),
+    replyMarkup: {
+      inline_keyboard: [[{
+        text: roomActionLabel(room.room_type),
+        callback_data: `crawler:run:proceed:${room.id}`,
+      }]],
+    },
+  } satisfies CrawlerOutboundMessage;
+}
+
+function formatRunCompleteMessage(run: AdventureRunRecord, room: RunRoomDetailRecord, memberCount: number) {
+  return {
+    text: [
+      "Crawler Run Complete",
+      "",
+      `Run ID: ${run.id}`,
+      `Theme: ${run.theme_key ?? "unknown"}`,
+      `Party size: ${memberCount}`,
+      "",
+      `The party cleared Floor ${room.floor_number}, Room ${room.room_number} and emerged from the dungeon.`,
+      "This is the current C3 exploration loop endpoint. Encounters and rewards arrive in later slices.",
+    ].join("\n"),
+  } satisfies CrawlerOutboundMessage;
+}
+
 async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string): Promise<CrawlerOutboundMessage> {
   const [members, leader] = await Promise.all([
     listPartyMemberDetails(party.id),
@@ -200,6 +277,104 @@ async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string):
   ]);
 
   return formatPartyLobby(party, members, viewerUserId, leader?.display_name ?? "Unknown leader");
+}
+
+async function buildRunMessage(runId: string): Promise<CrawlerOutboundMessage> {
+  const run = await getAdventureRunById(runId);
+
+  if (!run) {
+    return {
+      text: "The active crawler run could not be found.",
+    };
+  }
+
+  const [rooms, members] = await Promise.all([
+    listRunRoomDetails(run.id),
+    getPartyById(run.party_id).then((party) => party ? listPartyMemberDetails(party.id) : []),
+  ]);
+  const currentRoom = rooms.find((room) => room.id === run.current_room_id) ?? rooms[0];
+  const memberCount = activeMembers(members).length;
+
+  if (!currentRoom) {
+    return {
+      text: [
+        "Crawler Run",
+        "",
+        `Run ID: ${run.id}`,
+        "No active room is currently available.",
+      ].join("\n"),
+    };
+  }
+
+  if (run.status === "completed") {
+    return formatRunCompleteMessage(run, currentRoom, memberCount);
+  }
+
+  return formatActiveRoomPrompt(run, currentRoom, memberCount);
+}
+
+async function persistGeneratedRun(runId: string, generated: GeneratedRun) {
+  const createdRooms: RunRoomDetailRecord[] = [];
+
+  for (const floor of generated.floors) {
+    const persistedFloor = await createRunFloor({
+      runId,
+      floorNumber: floor.floorNumber,
+      seedFragment: floor.seedFragment,
+      metadata: floor.metadata,
+    });
+
+    for (const room of floor.rooms) {
+      const persistedRoom = await createRunRoom({
+        runId,
+        floorId: persistedFloor.id,
+        roomNumber: room.roomNumber,
+        roomType: room.roomType,
+        status: "unvisited",
+        templateKey: room.templateKey,
+        promptPayload: room.promptPayload,
+        generationPayload: room.generationPayload,
+      });
+
+      createdRooms.push({
+        ...persistedRoom,
+        floor_number: floor.floorNumber,
+      });
+    }
+  }
+
+  return createdRooms.sort((left, right) => {
+    if (left.floor_number !== right.floor_number) {
+      return left.floor_number - right.floor_number;
+    }
+
+    return left.room_number - right.room_number;
+  });
+}
+
+async function activateRoom(run: AdventureRunRecord, room: RunRoomDetailRecord) {
+  await updateRunRoom({
+    roomId: room.id,
+    status: "active",
+    entered: true,
+  });
+
+  return updateAdventureRun({
+    runId: run.id,
+    status: "awaiting_choice",
+    currentFloorNumber: room.floor_number,
+    currentRoomId: room.id,
+  });
+}
+
+function nextRoom(rooms: RunRoomDetailRecord[], currentRoomId: string) {
+  const currentIndex = rooms.findIndex((room) => room.id === currentRoomId);
+
+  if (currentIndex === -1) {
+    return null;
+  }
+
+  return rooms[currentIndex + 1] ?? null;
 }
 
 export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerOutboundMessage> {
@@ -214,6 +389,10 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
   const existingParty = await getActivePartyForUser(user.id);
 
   if (existingParty) {
+    if (existingParty.status === "in_run" && existingParty.active_run_id) {
+      return buildRunMessage(existingParty.active_run_id);
+    }
+
     return buildPartyLobbyMessage(existingParty, user.id);
   }
 
@@ -241,7 +420,7 @@ export async function handlePartyCommand(actor: TelegramActor): Promise<CrawlerO
   };
 }
 
-export async function handlePartyCallback(
+export async function handleCrawlerCallback(
   actor: TelegramActor,
   callbackData: string,
 ): Promise<CrawlerCommandResult> {
@@ -260,7 +439,9 @@ export async function handlePartyCallback(
     if (existingParty) {
       return {
         alertText: "You are already in an active party",
-        message: await buildPartyLobbyMessage(existingParty, user.id),
+        message: existingParty.status === "in_run" && existingParty.active_run_id
+          ? await buildRunMessage(existingParty.active_run_id)
+          : await buildPartyLobbyMessage(existingParty, user.id),
       };
     }
 
@@ -318,7 +499,9 @@ export async function handlePartyCallback(
     if (existingParty?.id && existingParty.id !== party.id) {
       return {
         alertText: "Leave your current party first",
-        message: await buildPartyLobbyMessage(existingParty, user.id),
+        message: existingParty.status === "in_run" && existingParty.active_run_id
+          ? await buildRunMessage(existingParty.active_run_id)
+          : await buildPartyLobbyMessage(existingParty, user.id),
       };
     }
 
@@ -454,9 +637,7 @@ export async function handlePartyCallback(
     if (party.status === "in_run" && party.active_run_id) {
       return {
         alertText: "Run already started",
-        message: {
-          text: `This party is already in a run.\n\nActive run: ${party.active_run_id}`,
-        },
+        message: await buildRunMessage(party.active_run_id),
       };
     }
 
@@ -480,18 +661,22 @@ export async function handlePartyCallback(
     });
 
     const seed = randomUUID();
-    const theme = selectThemeFromSeed(seed);
+    const generated = generateRun(seed);
     const run = await createAdventureRun({
       partyId: party.id,
       seed,
-      generationVersion: "crawler-v1-prototype",
-      floorCount: 1,
+      generationVersion: generated.generationVersion,
+      floorCount: generated.floorCount,
       difficultyTier: 1,
-      themeKey: theme.key,
+      themeKey: generated.theme.key,
       rulesVersionId: rulesVersion.id,
       status: "active",
     });
 
+    const rooms = await persistGeneratedRun(run.id, generated);
+    const firstRoom = rooms[0]!;
+
+    await activateRoom(run, firstRoom);
     await updateParty({
       partyId: party.id,
       status: "in_run",
@@ -507,28 +692,119 @@ export async function handlePartyCallback(
       metadata: {
         partyId: party.id,
         memberCount: members.length,
-        themeKey: theme.key,
+        themeKey: generated.theme.key,
+        floorCount: generated.floorCount,
       },
     });
 
     return {
       alertText: "Run started",
-      message: {
-        text: [
-          "The crawler run has begun.",
-          "",
-          `Run ID: ${run.id}`,
-          `Theme: ${theme.name}`,
-          `Seed: ${seed}`,
-          `Party size: ${members.length}`,
-          "",
-          "This is the Phase C2 stub run bootstrap. Real room generation arrives in Phase C3.",
-        ].join("\n"),
+      message: await buildRunMessage(run.id),
+    };
+  }
+
+  if (callbackData.startsWith("crawler:run:proceed:")) {
+    const roomId = callbackData.slice("crawler:run:proceed:".length);
+
+    if (!roomId) {
+      return {
+        alertText: "That room action is invalid",
+      };
+    }
+
+    const currentRoom = await getRunRoomDetailById(roomId);
+
+    if (!currentRoom) {
+      return {
+        alertText: "Room not found",
+      };
+    }
+
+    const run = await getAdventureRunById(currentRoom.run_id);
+
+    if (!run) {
+      return {
+        alertText: "Run not found",
+      };
+    }
+
+    const party = await getPartyById(run.party_id);
+
+    if (!party) {
+      return {
+        alertText: "Party not found",
+      };
+    }
+
+    const membership = await getPartyMemberByPartyAndUser(party.id, user.id);
+
+    if (!membership || !ACTIVE_PARTY_MEMBER_STATUSES.has(membership.status)) {
+      return {
+        alertText: "You are not an active member of this party",
+      };
+    }
+
+    if (run.current_room_id !== roomId) {
+      return {
+        alertText: "That room is no longer active",
+      };
+    }
+
+    await createRunChoice({
+      runId: run.id,
+      roomId: currentRoom.id,
+      actorUserId: user.id,
+      choiceKey: "proceed",
+      choicePayload: {
+        roomType: currentRoom.room_type,
       },
+    });
+
+    await updateRunRoom({
+      roomId: currentRoom.id,
+      status: "completed",
+      resolved: true,
+    });
+
+    const rooms = await listRunRoomDetails(run.id);
+    const next = nextRoom(rooms, currentRoom.id);
+    const memberCount = activeMembers(await listPartyMemberDetails(party.id)).length;
+
+    if (!next) {
+      await updateAdventureRun({
+        runId: run.id,
+        status: "completed",
+        currentRoomId: currentRoom.id,
+        currentFloorNumber: currentRoom.floor_number,
+      });
+      await updateParty({
+        partyId: party.id,
+        status: "completed",
+        activeRunId: null,
+      });
+
+      return {
+        alertText: "Run complete",
+        message: formatRunCompleteMessage((await getAdventureRunById(run.id)) ?? run, currentRoom, memberCount),
+      };
+    }
+
+    await activateRoom(run, next);
+
+    return {
+      alertText: `${currentRoom.room_type.replaceAll("_", " ")} resolved`,
+      message: formatActiveRoomPrompt((await getAdventureRunById(run.id)) ?? run, next, memberCount),
     };
   }
 
   return {
     alertText: "Unknown crawler action",
   };
+}
+
+export async function handlePartyCallback(
+  actor: TelegramActor,
+  callbackData: string,
+) {
+  return handleCrawlerCallback(actor, callbackData);
 }

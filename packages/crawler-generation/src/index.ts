@@ -27,6 +27,30 @@ export type LootTemplateSeed = {
 
 export type RoomWeightTable = Record<CrawlerRoomType, number>;
 
+export type GeneratedRoom = {
+  floorNumber: number;
+  roomNumber: number;
+  roomType: CrawlerRoomType;
+  templateKey: string;
+  promptPayload: Record<string, unknown>;
+  generationPayload: Record<string, unknown>;
+};
+
+export type GeneratedFloor = {
+  floorNumber: number;
+  seedFragment: string;
+  metadata: Record<string, unknown>;
+  rooms: GeneratedRoom[];
+};
+
+export type GeneratedRun = {
+  seed: string;
+  generationVersion: string;
+  theme: ThemeDefinition;
+  floorCount: number;
+  floors: GeneratedFloor[];
+};
+
 export const defaultRoomWeights: RoomWeightTable = {
   combat: 45,
   elite_combat: 10,
@@ -121,6 +145,17 @@ export const starterLootTemplates: LootTemplateSeed[] = [
   },
 ];
 
+const generationVersion = "crawler-v1-prototype";
+
+const roomTemplateByType: Record<CrawlerRoomType, string[]> = {
+  combat: ["ambush", "hallway_clash", "guard_post"],
+  elite_combat: ["elite_guard", "champion_den"],
+  treasure: ["hidden_cache", "supply_stash"],
+  event: ["unstable_shrine", "strange_idol"],
+  rest: ["safe_camp", "quiet_chamber"],
+  boss: ["theme_boss"],
+};
+
 export function selectThemeFromSeed(seed: string): ThemeDefinition {
   let hash = 0;
 
@@ -146,4 +181,140 @@ export function buildRoomWeightsForTheme(themeKey: CrawlerThemeKey): RoomWeightT
   }
 
   return merged;
+}
+
+export function generateRun(seed: string): GeneratedRun {
+  const theme = selectThemeFromSeed(seed);
+  const rng = createRng(seed);
+  const floorCount = 3;
+  const floors: GeneratedFloor[] = [];
+
+  for (let floorNumber = 1; floorNumber <= floorCount; floorNumber += 1) {
+    const roomCount = floorNumber === floorCount ? 3 : 3;
+    const rooms: GeneratedRoom[] = [];
+
+    for (let roomNumber = 1; roomNumber <= roomCount; roomNumber += 1) {
+      const isFirstRoom = floorNumber === 1 && roomNumber === 1;
+      const isBossRoom = floorNumber === floorCount && roomNumber === roomCount;
+      const roomType = isBossRoom
+        ? "boss"
+        : isFirstRoom
+          ? "combat"
+          : pickRoomType(rng, floorNumber, theme.key);
+      const templateKey = pickRoomTemplate(rng, roomType);
+
+      rooms.push({
+        floorNumber,
+        roomNumber,
+        roomType,
+        templateKey,
+        promptPayload: buildPromptPayload(theme, floorNumber, roomNumber, roomType, templateKey),
+        generationPayload: {
+          templateKey,
+          themeKey: theme.key,
+          floorNumber,
+          roomNumber,
+          roomType,
+        },
+      });
+    }
+
+    floors.push({
+      floorNumber,
+      seedFragment: `${seed}:floor:${floorNumber}`,
+      metadata: {
+        themeKey: theme.key,
+        roomCount,
+      },
+      rooms,
+    });
+  }
+
+  return {
+    seed,
+    generationVersion,
+    theme,
+    floorCount,
+    floors,
+  };
+}
+
+function buildPromptPayload(
+  theme: ThemeDefinition,
+  floorNumber: number,
+  roomNumber: number,
+  roomType: CrawlerRoomType,
+  templateKey: string,
+) {
+  const descriptionByType: Record<CrawlerRoomType, string> = {
+    combat: "A hostile presence stirs ahead.",
+    elite_combat: "A stronger foe guards the path forward.",
+    treasure: "A cache of supplies or treasure glints in the dark.",
+    event: "Something strange waits to be investigated.",
+    rest: "A rare calm settles over this chamber.",
+    boss: "A final threat bars the way.",
+  };
+
+  return {
+    title: `${theme.name} - Floor ${floorNumber}, Room ${roomNumber}`,
+    description: descriptionByType[roomType],
+    roomType,
+    templateKey,
+  };
+}
+
+function pickRoomType(
+  rng: () => number,
+  floorNumber: number,
+  themeKey: CrawlerThemeKey,
+): CrawlerRoomType {
+  const weights = buildRoomWeightsForTheme(themeKey);
+  const adjusted = { ...weights };
+
+  if (floorNumber === 1) {
+    adjusted.elite_combat = Math.max(0, adjusted.elite_combat - 5);
+    adjusted.treasure += 5;
+    adjusted.event += 5;
+  }
+
+  if (floorNumber === 3) {
+    adjusted.combat += 10;
+    adjusted.treasure = Math.max(0, adjusted.treasure - 5);
+  }
+
+  const candidates = Object.entries(adjusted)
+    .filter(([roomType, weight]) => roomType !== "boss" && weight > 0) as Array<[CrawlerRoomType, number]>;
+  const totalWeight = candidates.reduce((sum, [, weight]) => sum + weight, 0);
+  let cursor = rng() * totalWeight;
+
+  for (const [roomType, weight] of candidates) {
+    cursor -= weight;
+    if (cursor <= 0) {
+      return roomType;
+    }
+  }
+
+  return "combat";
+}
+
+function pickRoomTemplate(rng: () => number, roomType: CrawlerRoomType) {
+  const templates = roomTemplateByType[roomType];
+  return templates[Math.floor(rng() * templates.length)] ?? templates[0]!;
+}
+
+function createRng(seed: string) {
+  let state = 0;
+
+  for (const character of seed) {
+    state = (state * 31 + character.charCodeAt(0)) >>> 0;
+  }
+
+  if (state === 0) {
+    state = 123456789;
+  }
+
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
 }

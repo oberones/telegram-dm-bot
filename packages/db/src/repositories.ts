@@ -310,6 +310,45 @@ export type AdventureRunRecord = {
   updated_at: Date;
 };
 
+export type RunFloorRecord = {
+  id: string;
+  run_id: string;
+  floor_number: number;
+  seed_fragment: string;
+  metadata: Record<string, unknown>;
+  created_at: Date;
+};
+
+export type RunRoomRecord = {
+  id: string;
+  run_id: string;
+  floor_id: string;
+  room_number: number;
+  room_type: "combat" | "elite_combat" | "treasure" | "event" | "rest" | "boss";
+  status: "unvisited" | "active" | "completed" | "skipped" | "failed";
+  template_key: string | null;
+  prompt_payload: Record<string, unknown>;
+  generation_payload: Record<string, unknown>;
+  entered_at: Date | null;
+  resolved_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type RunRoomDetailRecord = RunRoomRecord & {
+  floor_number: number;
+};
+
+export type RunChoiceRecord = {
+  id: string;
+  run_id: string;
+  room_id: string;
+  actor_user_id: string | null;
+  choice_key: string;
+  choice_payload: Record<string, unknown>;
+  created_at: Date;
+};
+
 export type MonsterTemplateRecord = {
   id: string;
   template_key: string;
@@ -391,6 +430,24 @@ type AdventureRunInput = {
   themeKey?: string | null;
   rulesVersionId?: string | null;
   status?: AdventureRunRecord["status"];
+};
+
+type RunFloorInput = {
+  runId: string;
+  floorNumber: number;
+  seedFragment: string;
+  metadata?: Record<string, unknown>;
+};
+
+type RunRoomInput = {
+  runId: string;
+  floorId: string;
+  roomNumber: number;
+  roomType: RunRoomRecord["room_type"];
+  status?: RunRoomRecord["status"];
+  templateKey?: string | null;
+  promptPayload?: Record<string, unknown>;
+  generationPayload?: Record<string, unknown>;
 };
 
 type MonsterTemplateInput = {
@@ -2231,6 +2288,45 @@ export async function createAdventureRun(input: AdventureRunInput): Promise<Adve
   });
 }
 
+export async function updateAdventureRun(params: {
+  runId: string;
+  status?: AdventureRunRecord["status"];
+  currentFloorNumber?: number | null;
+  currentRoomId?: string | null;
+  activeEncounterId?: string | null;
+  summary?: Record<string, unknown>;
+}): Promise<AdventureRunRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<AdventureRunRecord>(
+      `
+        UPDATE adventure_runs
+        SET
+          status = COALESCE($2, status),
+          current_floor_number = CASE WHEN $3 THEN $4 ELSE current_floor_number END,
+          current_room_id = CASE WHEN $5 THEN $6 ELSE current_room_id END,
+          active_encounter_id = CASE WHEN $7 THEN $8 ELSE active_encounter_id END,
+          summary = COALESCE($9, summary),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        params.runId,
+        params.status ?? null,
+        params.currentFloorNumber !== undefined,
+        params.currentFloorNumber ?? null,
+        params.currentRoomId !== undefined,
+        params.currentRoomId ?? null,
+        params.activeEncounterId !== undefined,
+        params.activeEncounterId ?? null,
+        params.summary ?? null,
+      ],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function getAdventureRunById(runId: string): Promise<AdventureRunRecord | null> {
   return withTransaction(async (client) => {
     const result = await client.query<AdventureRunRecord>(
@@ -2259,6 +2355,165 @@ export async function listActiveAdventureRuns(): Promise<AdventureRunRecord[]> {
     );
 
     return result.rows;
+  });
+}
+
+export async function createRunFloor(input: RunFloorInput): Promise<RunFloorRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunFloorRecord>(
+      `
+        INSERT INTO run_floors (
+          run_id,
+          floor_number,
+          seed_fragment,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `,
+      [input.runId, input.floorNumber, input.seedFragment, input.metadata ?? {}],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function createRunRoom(input: RunRoomInput): Promise<RunRoomRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRoomRecord>(
+      `
+        INSERT INTO run_rooms (
+          run_id,
+          floor_id,
+          room_number,
+          room_type,
+          status,
+          template_key,
+          prompt_payload,
+          generation_payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+      `,
+      [
+        input.runId,
+        input.floorId,
+        input.roomNumber,
+        input.roomType,
+        input.status ?? "unvisited",
+        input.templateKey ?? null,
+        input.promptPayload ?? {},
+        input.generationPayload ?? {},
+      ],
+    );
+
+    return result.rows[0]!;
+  });
+}
+
+export async function listRunRoomDetails(runId: string): Promise<RunRoomDetailRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRoomDetailRecord>(
+      `
+        SELECT
+          rr.*,
+          rf.floor_number
+        FROM run_rooms rr
+        INNER JOIN run_floors rf
+          ON rf.id = rr.floor_id
+        WHERE rr.run_id = $1
+        ORDER BY rf.floor_number ASC, rr.room_number ASC
+      `,
+      [runId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function getRunRoomDetailById(roomId: string): Promise<RunRoomDetailRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRoomDetailRecord>(
+      `
+        SELECT
+          rr.*,
+          rf.floor_number
+        FROM run_rooms rr
+        INNER JOIN run_floors rf
+          ON rf.id = rr.floor_id
+        WHERE rr.id = $1
+        LIMIT 1
+      `,
+      [roomId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function updateRunRoom(params: {
+  roomId: string;
+  status?: RunRoomRecord["status"];
+  entered?: boolean;
+  resolved?: boolean;
+  promptPayload?: Record<string, unknown>;
+}): Promise<RunRoomRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunRoomRecord>(
+      `
+        UPDATE run_rooms
+        SET
+          status = COALESCE($2, status),
+          entered_at = CASE WHEN $3 THEN NOW() ELSE entered_at END,
+          resolved_at = CASE WHEN $4 THEN NOW() ELSE resolved_at END,
+          prompt_payload = COALESCE($5, prompt_payload),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        params.roomId,
+        params.status ?? null,
+        params.entered ?? false,
+        params.resolved ?? false,
+        params.promptPayload ?? null,
+      ],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function createRunChoice(params: {
+  runId: string;
+  roomId: string;
+  actorUserId?: string | null;
+  choiceKey: string;
+  choicePayload?: Record<string, unknown>;
+}): Promise<RunChoiceRecord> {
+  return withTransaction(async (client) => {
+    const result = await client.query<RunChoiceRecord>(
+      `
+        INSERT INTO run_choices (
+          run_id,
+          room_id,
+          actor_user_id,
+          choice_key,
+          choice_payload
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `,
+      [
+        params.runId,
+        params.roomId,
+        params.actorUserId ?? null,
+        params.choiceKey,
+        params.choicePayload ?? {},
+      ],
+    );
+
+    return result.rows[0]!;
   });
 }
 

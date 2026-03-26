@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { handlePartyCallback, handlePartyCommand } from "@dm-bot/crawler-domain";
+import { handleCrawlerCallback, handlePartyCommand } from "@dm-bot/crawler-domain";
 
 import {
   handleCallback,
@@ -43,7 +43,7 @@ type TelegramUpdateDeps = {
   handleReplyDisputeCommand: typeof handleReplyDisputeCommand;
   handleTextMessage: typeof handleTextMessage;
   handlePartyCommand: typeof handlePartyCommand;
-  handlePartyCallback: typeof handlePartyCallback;
+  handleCrawlerCallback: typeof handleCrawlerCallback;
 };
 
 const defaultDeps: TelegramUpdateDeps = {
@@ -65,7 +65,7 @@ const defaultDeps: TelegramUpdateDeps = {
   handleReplyDisputeCommand,
   handleTextMessage,
   handlePartyCommand,
-  handlePartyCallback,
+  handleCrawlerCallback,
 };
 
 function actorFromUser(user: {
@@ -88,8 +88,8 @@ export async function processTelegramUpdate(
   deps: TelegramUpdateDeps = defaultDeps,
 ) {
   if (update.callback_query?.from && update.callback_query.message?.chat.id) {
-    if ((update.callback_query.data ?? "").startsWith("crawler:party:")) {
-      const result = await deps.handlePartyCallback(
+    if ((update.callback_query.data ?? "").startsWith("crawler:")) {
+      const result = await deps.handleCrawlerCallback(
         actorFromUser(update.callback_query.from),
         update.callback_query.data ?? "",
       );
