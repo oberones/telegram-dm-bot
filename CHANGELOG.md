@@ -1,3 +1,13 @@
+## 0.21.0 (2026-03-26)
+
+### Feat
+
+- persistent equipment loadouts
+
+### Fix
+
+- disable buttons on old messages
+
 ## 0.20.0 (2026-03-26)
 
 ### Feat
