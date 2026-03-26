@@ -71,6 +71,7 @@ function buildDeps() {
     handleTextMessage: async () => null,
     handlePartyCommand: async () => ({ text: "party lobby" }),
     handleInventoryCommand: async () => ({ text: "inventory" }),
+    handleEquipmentCommand: async () => ({ text: "equipment" }),
     handleCrawlerCallback: async () => ({ alertText: "party ok", message: { text: "party callback" } }),
   };
 }
@@ -173,6 +174,26 @@ test("processTelegramUpdate handles /inventory in DM", async () => {
   );
 
   assert.deepEqual(sentMessages, [{ chatId: 100, text: "inventory" }]);
+});
+
+test("processTelegramUpdate handles /equipment in DM", async () => {
+  const { app, sentMessages } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 14,
+      message: {
+        message_id: 1,
+        text: "/equipment",
+        chat: { id: 100, type: "private" },
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(sentMessages, [{ chatId: 100, text: "equipment" }]);
 });
 
 test("processTelegramUpdate routes crawler callbacks before generic callbacks", async () => {

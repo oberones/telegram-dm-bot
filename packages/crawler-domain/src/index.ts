@@ -10,6 +10,7 @@ import {
   createInventoryItem,
   createParty,
   createRunReward,
+  equipInventoryItemForCharacter,
   createRunChoice,
   createRunFloor,
   createRunRoom,
@@ -18,10 +19,12 @@ import {
   getAdventureRunById,
   getCharacterById,
   getEligibleCharacterByUserId,
+  getInventoryItemById,
   getPartyById,
   getPartyMemberByPartyAndUser,
   getRunRoomDetailById,
   getUserById,
+  listEquipmentLoadoutsForCharacter,
   listInventoryItemsForCharacter,
   listLootTemplates,
   listMonsterTemplates,
@@ -31,6 +34,7 @@ import {
   setPartyMemberLeft,
   setPartyMemberReadyState,
   setPartyMemberStatus,
+  unequipInventoryItemForCharacter,
   updateEncounter,
   updateAdventureRun,
   updateParty,
@@ -40,7 +44,9 @@ import {
   upsertTelegramUser,
   type AdventureRunRecord,
   type CharacterRecord,
+  type EquipmentLoadoutDetailRecord,
   type EncounterParticipantRecord,
+  type InventoryItemRecord,
   type LootTemplateRecord,
   type PartyMemberDetailRecord,
   type PartyRecord,
@@ -180,56 +186,77 @@ function lootEquipmentSlot(template: LootTemplateSeed) {
   return template.equipmentSlot ?? null;
 }
 
+function lootEffectData(template: LootTemplateSeed) {
+  switch (template.key) {
+    case "balanced_longsword":
+      return {
+        summary: template.effectSummary,
+        attackBonus: 1,
+        applicableClasses: ["fighter", "rogue"],
+      };
+    case "ashen_wand":
+      return {
+        summary: template.effectSummary,
+        attackBonus: 1,
+        applicableClasses: ["wizard", "cleric"],
+      };
+    case "reinforced_chain":
+      return {
+        summary: template.effectSummary,
+        armorClassBonus: 1,
+        applicableClasses: ["fighter", "cleric"],
+      };
+    case "iron_charm":
+      return {
+        summary: template.effectSummary,
+        maxHpBonus: 2,
+      };
+    default:
+      return {
+        summary: template.effectSummary,
+      };
+  }
+}
+
 async function ensureCrawlerContent() {
   if (crawlerContentSeeded) {
     return;
   }
 
-  const [existingMonsters, existingLoot] = await Promise.all([
-    listMonsterTemplates(),
-    listLootTemplates(),
-  ]);
-
-  if (existingMonsters.length === 0) {
-    for (const template of starterMonsterTemplates) {
-      await upsertMonsterTemplate({
-        templateKey: template.key,
-        displayName: template.name,
-        themeKey: template.themeKey,
-        roleKey: template.role,
-        pointValue: template.pointValue,
-        statBlock: {
-          armorClass: template.armorClass,
-          hitPoints: template.hitPoints,
-          initiativeModifier: template.initiativeModifier,
-          attackModifier: template.attackModifier,
-          damageDiceCount: template.damageDiceCount,
-          damageDieSides: template.damageDieSides,
-          damageModifier: template.damageModifier,
-        },
-        aiProfile: {},
-        rewards: {},
-        contentVersion: crawlerContentVersion,
-      });
-    }
+  for (const template of starterMonsterTemplates) {
+    await upsertMonsterTemplate({
+      templateKey: template.key,
+      displayName: template.name,
+      themeKey: template.themeKey,
+      roleKey: template.role,
+      pointValue: template.pointValue,
+      statBlock: {
+        armorClass: template.armorClass,
+        hitPoints: template.hitPoints,
+        initiativeModifier: template.initiativeModifier,
+        attackModifier: template.attackModifier,
+        damageDiceCount: template.damageDiceCount,
+        damageDieSides: template.damageDieSides,
+        damageModifier: template.damageModifier,
+      },
+      aiProfile: {},
+      rewards: {},
+      contentVersion: crawlerContentVersion,
+    });
   }
 
-  if (existingLoot.length === 0) {
-    for (const template of starterLootTemplates) {
-      await upsertLootTemplate({
-        templateKey: template.key,
-        displayName: template.name,
-        categoryKey: template.category,
-        rarityKey: template.rarity,
-        equipmentSlot: lootEquipmentSlot(template),
-        isPermanent: template.isPermanent,
-        effectData: {
-          summary: template.effectSummary,
-        },
-        dropRules: {},
-        contentVersion: crawlerContentVersion,
-      });
-    }
+  for (const template of starterLootTemplates) {
+    await upsertLootTemplate({
+      templateKey: template.key,
+      displayName: template.name,
+      categoryKey: template.category,
+      rarityKey: template.rarity,
+      equipmentSlot: lootEquipmentSlot(template),
+      isPermanent: template.isPermanent,
+      effectData: lootEffectData(template),
+      dropRules: {},
+      contentVersion: crawlerContentVersion,
+    });
   }
 
   crawlerContentSeeded = true;
@@ -319,9 +346,49 @@ function isEncounterRoom(roomType: RunRoomDetailRecord["room_type"]) {
   return roomType === "combat" || roomType === "elite_combat" || roomType === "boss";
 }
 
+type EquipmentEffect = {
+  attackBonus: number;
+  armorClassBonus: number;
+  maxHpBonus: number;
+};
+
+function appliesToClass(effectData: Record<string, unknown> | null, classKey: string) {
+  const applicableClasses = effectData?.applicableClasses;
+
+  if (!Array.isArray(applicableClasses) || applicableClasses.length === 0) {
+    return true;
+  }
+
+  return applicableClasses.includes(classKey);
+}
+
+function extractEquipmentEffect(
+  loadouts: EquipmentLoadoutDetailRecord[],
+  classKey: string,
+) {
+  return loadouts.reduce<EquipmentEffect>((totals, loadout) => {
+    const effectData = loadout.effect_data;
+
+    if (!effectData || !appliesToClass(effectData, classKey)) {
+      return totals;
+    }
+
+    return {
+      attackBonus: totals.attackBonus + (typeof effectData.attackBonus === "number" ? effectData.attackBonus : 0),
+      armorClassBonus: totals.armorClassBonus + (typeof effectData.armorClassBonus === "number" ? effectData.armorClassBonus : 0),
+      maxHpBonus: totals.maxHpBonus + (typeof effectData.maxHpBonus === "number" ? effectData.maxHpBonus : 0),
+    };
+  }, {
+    attackBonus: 0,
+    armorClassBonus: 0,
+    maxHpBonus: 0,
+  });
+}
+
 function toPlayerEncounterParticipant(
   member: PartyMemberDetailRecord,
   character: CharacterRecord,
+  loadouts: EquipmentLoadoutDetailRecord[],
   slot: number,
 ): EncounterParticipant {
   const derived = character.derived_stats as { maxHp?: number; armorClass?: number; initiativeMod?: number };
@@ -348,16 +415,18 @@ function toPlayerEncounterParticipant(
     EncounterParticipant,
     "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
   > = profileByClass[character.class_key] ?? defaultProfile;
+  const equipmentEffect = extractEquipmentEffect(loadouts, character.class_key);
+  const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
 
   return {
     id: `player-${slot}-${character.id}`,
     name: character.name,
     side: "player",
     initiativeModifier: derived.initiativeMod ?? 0,
-    armorClass: derived.armorClass ?? 10,
-    hitPoints: derived.maxHp ?? 1,
-    maxHitPoints: derived.maxHp ?? 1,
-    attackModifier: profile.attackModifier,
+    armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus,
+    hitPoints: maxHitPoints,
+    maxHitPoints,
+    attackModifier: profile.attackModifier + equipmentEffect.attackBonus,
     damageDiceCount: profile.damageDiceCount,
     damageDieSides: profile.damageDieSides,
     damageModifier: profile.damageModifier,
@@ -597,6 +666,68 @@ function formatInventoryMessage(
   };
 }
 
+function formatEquipmentMessage(
+  character: CharacterRecord,
+  inventoryItems: InventoryItemRecord[],
+  lootTemplates: LootTemplateRecord[],
+  loadouts: EquipmentLoadoutDetailRecord[],
+): CrawlerOutboundMessage {
+  const lootById = new Map(lootTemplates.map((template) => [template.id, template]));
+  const equippedBySlot = new Map(loadouts.map((loadout) => [loadout.slot, loadout]));
+  const equipableItems = inventoryItems.filter((item) => {
+    const template = item.loot_template_id ? lootById.get(item.loot_template_id) : null;
+    return Boolean(template?.equipment_slot) && (item.status === "owned" || item.status === "equipped");
+  });
+
+  const lines = [
+    "Crawler Equipment",
+    "",
+    `Character: ${character.name} (${character.class_key})`,
+    "",
+    "Equipped",
+    `Weapon: ${equippedBySlot.get("weapon")?.loot_display_name ?? "None"}`,
+    `Armor: ${equippedBySlot.get("armor")?.loot_display_name ?? "None"}`,
+    `Accessory: ${equippedBySlot.get("accessory")?.loot_display_name ?? "None"}`,
+    "",
+    "Available Gear",
+  ];
+
+  if (equipableItems.length === 0) {
+    lines.push("No equipable loot owned yet.");
+    return { text: lines.join("\n") };
+  }
+
+  const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  for (const item of equipableItems.slice(0, 12)) {
+    const template = item.loot_template_id ? lootById.get(item.loot_template_id) : null;
+
+    if (!template?.equipment_slot) {
+      continue;
+    }
+
+    const isEquipped = item.status === "equipped";
+    lines.push(`- ${template.display_name} [${template.equipment_slot}] ${isEquipped ? "(equipped)" : ""}`.trim());
+
+    buttons.push([{
+      text: isEquipped ? `Unequip ${template.display_name}` : `Equip ${template.display_name}`,
+      callback_data: isEquipped
+        ? `crawler:equipment:unequip:${template.equipment_slot}`
+        : `crawler:equipment:equip:${item.id}`,
+    }]);
+  }
+
+  if (equipableItems.length > 12) {
+    lines.push("");
+    lines.push(`Showing 12 of ${equipableItems.length} equipable items.`);
+  }
+
+  return {
+    text: lines.join("\n"),
+    ...(buttons.length > 0 ? { replyMarkup: { inline_keyboard: buttons } } : {}),
+  };
+}
+
 async function buildPartyLobbyMessage(party: PartyRecord, viewerUserId: string): Promise<CrawlerOutboundMessage> {
   const [members, leader] = await Promise.all([
     listPartyMemberDetails(party.id),
@@ -686,15 +817,17 @@ async function persistGeneratedRun(runId: string, generated: GeneratedRun) {
 async function buildPlayerParticipants(members: PartyMemberDetailRecord[]) {
   const currentMembers = activeMembers(members);
   const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
+  const loadouts = await Promise.all(currentMembers.map((member) => listEquipmentLoadoutsForCharacter(member.character_id)));
 
   return currentMembers.flatMap((member, index) => {
     const character = characters[index];
+    const characterLoadouts = loadouts[index] ?? [];
 
     if (!character) {
       return [];
     }
 
-    return [toPlayerEncounterParticipant(member, character, index + 1)];
+    return [toPlayerEncounterParticipant(member, character, characterLoadouts, index + 1)];
   });
 }
 
@@ -977,6 +1110,38 @@ export async function handleInventoryCommand(actor: TelegramActor): Promise<Craw
   return formatInventoryMessage(character, inventoryItems, lootTemplates);
 }
 
+export async function handleEquipmentCommand(actor: TelegramActor): Promise<CrawlerOutboundMessage> {
+  const user = await ensureUser(actor);
+
+  if (user.status !== "active") {
+    return {
+      text: restrictedUserMessage(),
+    };
+  }
+
+  await ensureCrawlerContent();
+
+  const character = await getEligibleCharacterByUserId(user.id);
+
+  if (!character) {
+    return {
+      text: [
+        "You need an active character before you can manage crawler equipment.",
+        "",
+        "Create one in DM with /create_character first.",
+      ].join("\n"),
+    };
+  }
+
+  const [inventoryItems, lootTemplates, loadouts] = await Promise.all([
+    listInventoryItemsForCharacter(character.id),
+    listLootTemplates(),
+    listEquipmentLoadoutsForCharacter(character.id),
+  ]);
+
+  return formatEquipmentMessage(character, inventoryItems, lootTemplates, loadouts);
+}
+
 export async function handleCrawlerCallback(
   actor: TelegramActor,
   callbackData: string,
@@ -987,6 +1152,125 @@ export async function handleCrawlerCallback(
     return {
       alertText: "Your crawler access is restricted",
       message: { text: restrictedUserMessage() },
+    };
+  }
+
+  if (callbackData.startsWith("crawler:equipment:equip:")) {
+    const inventoryItemId = callbackData.slice("crawler:equipment:equip:".length);
+
+    if (!inventoryItemId) {
+      return {
+        alertText: "That item could not be equipped",
+      };
+    }
+
+    await ensureCrawlerContent();
+
+    const character = await getEligibleCharacterByUserId(user.id);
+
+    if (!character) {
+      return {
+        alertText: "No active character found",
+        message: {
+          text: "You need an active character before you can equip crawler loot.",
+        },
+      };
+    }
+
+    const inventoryItem = await getInventoryItemById(inventoryItemId);
+
+    if (!inventoryItem || inventoryItem.user_id !== user.id || inventoryItem.character_id !== character.id) {
+      return {
+        alertText: "That item is not available to this character",
+      };
+    }
+
+    const lootTemplates = await listLootTemplates();
+    const template = inventoryItem.loot_template_id
+      ? lootTemplates.find((candidate) => candidate.id === inventoryItem.loot_template_id)
+      : null;
+
+    if (!template?.equipment_slot) {
+      return {
+        alertText: "That item cannot be equipped",
+      };
+    }
+
+    const effectData = template.effect_data;
+
+    if (!appliesToClass(effectData, character.class_key)) {
+      return {
+        alertText: `${template.display_name} cannot be used by ${character.class_key}`,
+      };
+    }
+
+    await equipInventoryItemForCharacter({
+      characterId: character.id,
+      inventoryItemId: inventoryItem.id,
+      slot: template.equipment_slot,
+    });
+
+    await createAuditLog({
+      actorType: "user",
+      actorUserId: user.id,
+      action: "crawler_item_equipped",
+      targetType: "inventory_item",
+      targetId: inventoryItem.id,
+      metadata: {
+        characterId: character.id,
+        slot: template.equipment_slot,
+        lootTemplateId: template.id,
+      },
+    });
+
+    return {
+      alertText: `${template.display_name} equipped`,
+      message: await handleEquipmentCommand(actor),
+    };
+  }
+
+  if (callbackData.startsWith("crawler:equipment:unequip:")) {
+    const slot = callbackData.slice("crawler:equipment:unequip:".length) as "weapon" | "armor" | "accessory";
+
+    if (!["weapon", "armor", "accessory"].includes(slot)) {
+      return {
+        alertText: "That slot could not be unequipped",
+      };
+    }
+
+    const character = await getEligibleCharacterByUserId(user.id);
+
+    if (!character) {
+      return {
+        alertText: "No active character found",
+      };
+    }
+
+    const changed = await unequipInventoryItemForCharacter({
+      characterId: character.id,
+      slot,
+    });
+
+    if (!changed) {
+      return {
+        alertText: "Nothing was equipped in that slot",
+      };
+    }
+
+    await createAuditLog({
+      actorType: "user",
+      actorUserId: user.id,
+      action: "crawler_item_unequipped",
+      targetType: "character",
+      targetId: character.id,
+      metadata: {
+        slot,
+      },
+    });
+
+    return {
+      alertText: `${slot} unequipped`,
+      message: await handleEquipmentCommand(actor),
     };
   }
 

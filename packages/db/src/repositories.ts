@@ -432,6 +432,25 @@ export type InventoryItemRecord = {
   lost_at: Date | null;
 };
 
+export type EquipmentLoadoutRecord = {
+  id: string;
+  character_id: string;
+  slot: "weapon" | "armor" | "accessory";
+  inventory_item_id: string;
+  equipped_at: Date;
+  created_at: Date;
+};
+
+export type EquipmentLoadoutDetailRecord = EquipmentLoadoutRecord & {
+  item_status: InventoryItemRecord["status"];
+  loot_template_id: string | null;
+  loot_template_key: string | null;
+  loot_display_name: string | null;
+  category_key: string | null;
+  rarity_key: string | null;
+  effect_data: Record<string, unknown> | null;
+};
+
 export type RunRewardRecord = {
   id: string;
   run_id: string;
@@ -547,6 +566,12 @@ type InventoryItemInput = {
   lootTemplateId?: string | null;
   quantity?: number;
   metadata?: Record<string, unknown>;
+};
+
+type EquipInventoryItemInput = {
+  characterId: string;
+  inventoryItemId: string;
+  slot: EquipmentLoadoutRecord["slot"];
 };
 
 type RunRewardInput = {
@@ -2923,6 +2948,45 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<In
   });
 }
 
+export async function getInventoryItemById(itemId: string): Promise<InventoryItemRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<InventoryItemRecord>(
+      `
+        SELECT *
+        FROM inventory_items
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [itemId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function updateInventoryItemStatus(params: {
+  inventoryItemId: string;
+  status: InventoryItemRecord["status"];
+}): Promise<InventoryItemRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<InventoryItemRecord>(
+      `
+        UPDATE inventory_items
+        SET
+          status = $2::inventory_item_status,
+          updated_at = NOW(),
+          consumed_at = CASE WHEN $2::inventory_item_status = 'consumed'::inventory_item_status THEN NOW() ELSE consumed_at END,
+          lost_at = CASE WHEN $2::inventory_item_status IN ('lost'::inventory_item_status, 'destroyed'::inventory_item_status) THEN NOW() ELSE lost_at END
+        WHERE id = $1
+        RETURNING *
+      `,
+      [params.inventoryItemId, params.status],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function listInventoryItemsForCharacter(characterId: string): Promise<InventoryItemRecord[]> {
   return withTransaction(async (client) => {
     const result = await client.query<InventoryItemRecord>(
@@ -2952,6 +3016,123 @@ export async function listInventoryItemsForUser(userId: string): Promise<Invento
     );
 
     return result.rows;
+  });
+}
+
+export async function listEquipmentLoadoutsForCharacter(characterId: string): Promise<EquipmentLoadoutDetailRecord[]> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EquipmentLoadoutDetailRecord>(
+      `
+        SELECT
+          equipment_loadouts.*,
+          inventory_items.status AS item_status,
+          inventory_items.loot_template_id,
+          loot_templates.template_key AS loot_template_key,
+          loot_templates.display_name AS loot_display_name,
+          loot_templates.category_key,
+          loot_templates.rarity_key,
+          loot_templates.effect_data
+        FROM equipment_loadouts
+        JOIN inventory_items ON inventory_items.id = equipment_loadouts.inventory_item_id
+        LEFT JOIN loot_templates ON loot_templates.id = inventory_items.loot_template_id
+        WHERE equipment_loadouts.character_id = $1
+        ORDER BY equipment_loadouts.slot ASC
+      `,
+      [characterId],
+    );
+
+    return result.rows;
+  });
+}
+
+export async function equipInventoryItemForCharacter(input: EquipInventoryItemInput): Promise<void> {
+  return withTransaction(async (client) => {
+    const existingInSlot = await client.query<{ inventory_item_id: string }>(
+      `
+        SELECT inventory_item_id
+        FROM equipment_loadouts
+        WHERE character_id = $1 AND slot = $2::equipment_slot
+        LIMIT 1
+      `,
+      [input.characterId, input.slot],
+    );
+
+    if (existingInSlot.rows[0]?.inventory_item_id) {
+      await client.query(
+        `
+          UPDATE inventory_items
+          SET status = 'owned'::inventory_item_status, updated_at = NOW()
+          WHERE id = $1
+        `,
+        [existingInSlot.rows[0].inventory_item_id],
+      );
+    }
+
+    await client.query(
+      `
+        DELETE FROM equipment_loadouts
+        WHERE inventory_item_id = $1
+      `,
+      [input.inventoryItemId],
+    );
+
+    await client.query(
+      `
+        INSERT INTO equipment_loadouts (
+          character_id,
+          slot,
+          inventory_item_id
+        )
+        VALUES ($1, $2::equipment_slot, $3)
+        ON CONFLICT (character_id, slot) DO UPDATE
+        SET
+          inventory_item_id = EXCLUDED.inventory_item_id,
+          equipped_at = NOW()
+      `,
+      [input.characterId, input.slot, input.inventoryItemId],
+    );
+
+    await client.query(
+      `
+        UPDATE inventory_items
+        SET status = 'equipped'::inventory_item_status, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [input.inventoryItemId],
+    );
+  });
+}
+
+export async function unequipInventoryItemForCharacter(params: {
+  characterId: string;
+  slot: EquipmentLoadoutRecord["slot"];
+}): Promise<boolean> {
+  return withTransaction(async (client) => {
+    const deleted = await client.query<{ inventory_item_id: string }>(
+      `
+        DELETE FROM equipment_loadouts
+        WHERE character_id = $1 AND slot = $2::equipment_slot
+        RETURNING inventory_item_id
+      `,
+      [params.characterId, params.slot],
+    );
+
+    const inventoryItemId = deleted.rows[0]?.inventory_item_id;
+
+    if (!inventoryItemId) {
+      return false;
+    }
+
+    await client.query(
+      `
+        UPDATE inventory_items
+        SET status = 'owned'::inventory_item_status, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [inventoryItemId],
+    );
+
+    return true;
   });
 }
 
