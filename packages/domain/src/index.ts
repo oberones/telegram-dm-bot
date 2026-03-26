@@ -68,6 +68,7 @@ export type TelegramActor = {
 };
 
 type CharacterClass = "fighter" | "rogue" | "wizard" | "cleric";
+type AbilityKey = keyof CharacterTemplate["abilityScores"];
 
 type CharacterTemplate = {
   classKey: CharacterClass;
@@ -99,6 +100,18 @@ type CharacterTemplate = {
     secondWindAvailable?: boolean;
     spellSlots?: Record<string, number>;
   };
+};
+
+type RolledAbilityDetail = {
+  score: number;
+  rolls: [number, number, number, number];
+  dropped: number;
+};
+
+type RolledCharacterPlan = {
+  abilityScores: CharacterTemplate["abilityScores"];
+  derivedStats: CharacterTemplate["derivedStats"];
+  details: Record<AbilityKey, RolledAbilityDetail>;
 };
 
 const classTemplates: Record<CharacterClass, CharacterTemplate> = {
@@ -205,6 +218,20 @@ function classButtons() {
   ];
 }
 
+function rollButtons(allowReroll: boolean) {
+  return [
+    [{ text: "Use These Rolls", callback_data: "cc:roll:accept" }],
+    ...(allowReroll ? [[{ text: "Reroll Once", callback_data: "cc:roll:reroll" }]] : []),
+  ];
+}
+
+function confirmCharacterButtons() {
+  return [
+    [{ text: "Enter the Arena", callback_data: "cc:confirm:create" }],
+    [{ text: "Rename Character", callback_data: "cc:confirm:rename" }],
+  ];
+}
+
 function startButtons(hasCharacter: boolean) {
   if (hasCharacter) {
     return [
@@ -224,12 +251,14 @@ function startButtons(hasCharacter: boolean) {
 function rulesConfigSnapshot() {
   return {
     version: "arena-v1-alpha",
+    characterGeneration: {
+      method: "4d6_drop_lowest_assigned_by_class_priority",
+      rerollsAllowed: 1,
+    },
     classes: Object.values(classTemplates).map((template) => ({
       classKey: template.classKey,
       level: template.level,
       summary: template.summary,
-      abilityScores: template.abilityScores,
-      derivedStats: template.derivedStats,
       loadout: template.loadout,
     })),
   };
@@ -248,12 +277,211 @@ function formatCharacterSummary(character: CharacterRecord) {
   ].join("\n");
 }
 
+function formatAbilityScores(scores: CharacterTemplate["abilityScores"]) {
+  return [
+    `STR ${scores.str}`,
+    `DEX ${scores.dex}`,
+    `CON ${scores.con}`,
+    `INT ${scores.int}`,
+    `WIS ${scores.wis}`,
+    `CHA ${scores.cha}`,
+  ].join(" | ");
+}
+
+function formatRollPlan(template: CharacterTemplate, plan: RolledCharacterPlan, rerollsRemaining: number) {
+  const lines: string[] = [
+    `${template.label} selected.`,
+    template.summary,
+    "",
+    "You rolled your ability scores with 4d6, dropping the lowest die each time.",
+  ];
+
+  const orderedAbilities: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
+
+  for (const ability of orderedAbilities) {
+    const detail = plan.details[ability];
+    lines.push(
+      `${ability.toUpperCase()} ${detail.score}: [${detail.rolls.join(", ")}] drop ${detail.dropped}`,
+    );
+  }
+
+  lines.push("");
+  lines.push(`Derived combat stats: HP ${plan.derivedStats.maxHp}, AC ${plan.derivedStats.armorClass}, Init ${plan.derivedStats.initiativeMod >= 0 ? "+" : ""}${plan.derivedStats.initiativeMod}`);
+  lines.push(`Rerolls remaining: ${rerollsRemaining}`);
+  lines.push("");
+  lines.push("Use these rolls or reroll once, then you will name your character.");
+
+  return lines.join("\n");
+}
+
+function formatCharacterPreview(
+  template: CharacterTemplate,
+  name: string,
+  abilityScores: CharacterTemplate["abilityScores"],
+  derivedStats: CharacterTemplate["derivedStats"],
+) {
+  return [
+    "Character preview:",
+    "",
+    `Name: ${name}`,
+    `Class: ${template.label}`,
+    `Level: ${template.level}`,
+    "",
+    formatAbilityScores(abilityScores),
+    "",
+    `HP ${derivedStats.maxHp} | AC ${derivedStats.armorClass} | Init ${derivedStats.initiativeMod >= 0 ? "+" : ""}${derivedStats.initiativeMod}`,
+    `Actions: ${template.loadout.actions.join(", ")}`,
+    "",
+    "If this looks right, enter the arena.",
+  ].join("\n");
+}
+
 function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function isSupportedClass(value: string): value is CharacterClass {
   return value in classTemplates;
+}
+
+function abilityModifier(score: number) {
+  return Math.floor((score - 10) / 2);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function rollD6() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+function rollAbilityDetail(): RolledAbilityDetail {
+  const rolls = [rollD6(), rollD6(), rollD6(), rollD6()] as [number, number, number, number];
+  const sorted = [...rolls].sort((left, right) => left - right);
+  const dropped = sorted[0]!;
+  const score = sorted.slice(1).reduce((total, value) => total + value, 0);
+
+  return {
+    score,
+    rolls,
+    dropped,
+  };
+}
+
+function classAbilityPriority(classKey: CharacterClass): AbilityKey[] {
+  switch (classKey) {
+    case "fighter":
+      return ["str", "con", "dex", "wis", "cha", "int"];
+    case "rogue":
+      return ["dex", "con", "cha", "int", "wis", "str"];
+    case "wizard":
+      return ["int", "dex", "con", "wis", "cha", "str"];
+    case "cleric":
+      return ["wis", "con", "str", "cha", "dex", "int"];
+  }
+}
+
+function computeDerivedStats(classKey: CharacterClass, abilityScores: CharacterTemplate["abilityScores"]): CharacterTemplate["derivedStats"] {
+  const dexMod = abilityModifier(abilityScores.dex);
+  const conMod = abilityModifier(abilityScores.con);
+  const wisMod = abilityModifier(abilityScores.wis);
+  const intMod = abilityModifier(abilityScores.int);
+  const strMod = abilityModifier(abilityScores.str);
+  const chaMod = abilityModifier(abilityScores.cha);
+  const proficiencyBonus = 2;
+
+  switch (classKey) {
+    case "fighter":
+      return {
+        maxHp: Math.max(1, 10 + conMod),
+        armorClass: 16,
+        initiativeMod: dexMod,
+        proficiencyBonus,
+        speed: 30,
+        saveMods: {
+          str: strMod + proficiencyBonus,
+          dex: dexMod,
+          con: conMod + proficiencyBonus,
+          int: intMod,
+          wis: wisMod,
+          cha: chaMod,
+        },
+      };
+    case "rogue":
+      return {
+        maxHp: Math.max(1, 8 + conMod),
+        armorClass: 11 + dexMod,
+        initiativeMod: dexMod,
+        proficiencyBonus,
+        speed: 30,
+        saveMods: {
+          str: strMod,
+          dex: dexMod + proficiencyBonus,
+          con: conMod,
+          int: intMod + proficiencyBonus,
+          wis: wisMod,
+          cha: chaMod,
+        },
+      };
+    case "wizard":
+      return {
+        maxHp: Math.max(1, 6 + conMod),
+        armorClass: 10 + dexMod,
+        initiativeMod: dexMod,
+        proficiencyBonus,
+        speed: 30,
+        saveMods: {
+          str: strMod,
+          dex: dexMod,
+          con: conMod,
+          int: intMod + proficiencyBonus,
+          wis: wisMod + proficiencyBonus,
+          cha: chaMod,
+        },
+      };
+    case "cleric":
+      return {
+        maxHp: Math.max(1, 8 + conMod),
+        armorClass: 15 + clamp(dexMod, -5, 2),
+        initiativeMod: dexMod,
+        proficiencyBonus,
+        speed: 30,
+        saveMods: {
+          str: strMod,
+          dex: dexMod,
+          con: conMod,
+          int: intMod,
+          wis: wisMod + proficiencyBonus,
+          cha: chaMod + proficiencyBonus,
+        },
+      };
+  }
+}
+
+function buildRolledCharacterPlan(template: CharacterTemplate): RolledCharacterPlan {
+  const details = {} as Record<AbilityKey, RolledAbilityDetail>;
+  const rolledPool = Array.from({ length: 6 }, () => rollAbilityDetail()).sort((left, right) => right.score - left.score);
+  const priority = classAbilityPriority(template.classKey);
+
+  for (const [index, ability] of priority.entries()) {
+    details[ability] = rolledPool[index]!;
+  }
+
+  const abilityScores = {
+    str: details.str.score,
+    dex: details.dex.score,
+    con: details.con.score,
+    int: details.int.score,
+    wis: details.wis.score,
+    cha: details.cha.score,
+  };
+
+  return {
+    abilityScores,
+    derivedStats: computeDerivedStats(template.classKey, abilityScores),
+    details,
+  };
 }
 
 async function ensureUser(actor: TelegramActor) {
@@ -740,7 +968,7 @@ export async function handleCreateCharacter(actor: TelegramActor): Promise<Outbo
   return {
     text: [
       "Choose your arena class.",
-      "Each option uses a fixed starter build so the first version stays fast and balanced.",
+      "You will roll your character's ability scores with 4d6, drop the lowest die, then name the character.",
     ].join("\n"),
     replyMarkup: {
       inline_keyboard: classButtons(),
@@ -811,6 +1039,200 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
     };
   }
 
+  if (callbackData === "cc:roll:accept") {
+    const user = await ensureUser(actor);
+    const session = await getActiveSessionByUserId(user.id);
+
+    if (!session || session.flow_type !== "character_creation" || session.step_key !== "awaiting_roll_choice") {
+      return {
+        alertText: "This character creation session has expired. Start again with /create_character.",
+      };
+    }
+
+    await upsertActiveSession({
+      userId: user.id,
+      flowType: "character_creation",
+      stepKey: "awaiting_name",
+      data: session.data,
+    });
+
+    return {
+      alertText: "Rolls locked in",
+      message: {
+        text: [
+          "Your rolls are locked in.",
+          "",
+          `Ability scores: ${formatAbilityScores(session.data.abilityScores as CharacterTemplate["abilityScores"])}`,
+          "",
+          "Send the name you want your arena character to use.",
+        ].join("\n"),
+      },
+    };
+  }
+
+  if (callbackData === "cc:roll:reroll") {
+    const user = await ensureUser(actor);
+    const session = await getActiveSessionByUserId(user.id);
+
+    if (!session || session.flow_type !== "character_creation" || session.step_key !== "awaiting_roll_choice") {
+      return {
+        alertText: "This character creation session has expired. Start again with /create_character.",
+      };
+    }
+
+    const classKey = String(session.data.classKey ?? "");
+    const rerollsRemaining = Number(session.data.rerollsRemaining ?? 0);
+
+    if (!isSupportedClass(classKey)) {
+      return {
+        alertText: "This character creation session is invalid. Start again with /create_character.",
+      };
+    }
+
+    if (rerollsRemaining <= 0) {
+      return {
+        alertText: "No rerolls remaining.",
+      };
+    }
+
+    const template = classTemplates[classKey];
+    const plan = buildRolledCharacterPlan(template);
+
+    await upsertActiveSession({
+      userId: user.id,
+      flowType: "character_creation",
+      stepKey: "awaiting_roll_choice",
+      data: {
+        classKey: template.classKey,
+        abilityScores: plan.abilityScores,
+        derivedStats: plan.derivedStats,
+        rollDetails: plan.details,
+        rerollsRemaining: rerollsRemaining - 1,
+      },
+    });
+
+    return {
+      alertText: "Reroll complete",
+      message: {
+        text: formatRollPlan(template, plan, rerollsRemaining - 1),
+        replyMarkup: {
+          inline_keyboard: rollButtons(rerollsRemaining - 1 > 0),
+        },
+      },
+    };
+  }
+
+  if (callbackData === "cc:confirm:rename") {
+    const user = await ensureUser(actor);
+    const session = await getActiveSessionByUserId(user.id);
+
+    if (!session || session.flow_type !== "character_creation" || session.step_key !== "awaiting_confirmation") {
+      return {
+        alertText: "This character creation session has expired. Start again with /create_character.",
+      };
+    }
+
+    await upsertActiveSession({
+      userId: user.id,
+      flowType: "character_creation",
+      stepKey: "awaiting_name",
+      data: {
+        ...session.data,
+        pendingName: undefined,
+      },
+    });
+
+    return {
+      alertText: "Rename your character",
+      message: {
+        text: "Send a different character name.",
+      },
+    };
+  }
+
+  if (callbackData === "cc:confirm:create") {
+    const user = await ensureUser(actor);
+    const session = await getActiveSessionByUserId(user.id);
+
+    if (!session || session.flow_type !== "character_creation" || session.step_key !== "awaiting_confirmation") {
+      return {
+        alertText: "This character creation session has expired. Start again with /create_character.",
+      };
+    }
+
+    const classKey = String(session.data.classKey ?? "");
+    const pendingName = String(session.data.pendingName ?? "").trim();
+    const abilityScores = session.data.abilityScores as CharacterTemplate["abilityScores"] | undefined;
+    const derivedStats = session.data.derivedStats as CharacterTemplate["derivedStats"] | undefined;
+
+    if (!isSupportedClass(classKey) || !pendingName || !abilityScores || !derivedStats) {
+      return {
+        alertText: "This character creation session is invalid. Start again with /create_character.",
+      };
+    }
+
+    const existingCharacter = await getActiveCharacterByUserId(user.id);
+
+    if (existingCharacter) {
+      return {
+        alertText: "You already have a character.",
+        message: {
+          text:
+            existingCharacter.status === "frozen"
+              ? `${frozenCharacterMessage(existingCharacter)} Use /character to view it.`
+              : "You already have an active character. Use /character to view it.",
+        },
+      };
+    }
+
+    const template = classTemplates[classKey];
+    const rulesVersion = await ensureRulesVersion({
+      versionKey: "arena-v1-alpha",
+      summary: "Initial starter rules for automated 1v1 arbitration combat.",
+      config: rulesConfigSnapshot(),
+    });
+
+    const character = await createCharacterAndCompleteSession({
+      userId: user.id,
+      name: pendingName,
+      classKey: template.classKey,
+      level: template.level,
+      rulesVersionId: rulesVersion.id,
+      abilityScores,
+      derivedStats,
+      loadout: template.loadout,
+      resourceState: template.resourceState,
+    });
+
+    await createAuditLog({
+      actorType: "user",
+      actorUserId: user.id,
+      action: "character_created",
+      targetType: "character",
+      targetId: character.id,
+      metadata: {
+        characterName: character.name,
+        classKey: character.class_key,
+        level: character.level,
+      },
+    });
+
+    return {
+      alertText: "Character created",
+      message: {
+        text: [
+          "Your character is ready.",
+          "",
+          formatCharacterSummary(character),
+          formatAbilityScores(abilityScores),
+        ].join("\n"),
+        replyMarkup: {
+          inline_keyboard: [[{ text: "View Character", callback_data: "nav:character" }]],
+        },
+      },
+    };
+  }
+
   if (!callbackData.startsWith("cc:class:")) {
     return {
       alertText: "That action is not supported yet.",
@@ -844,25 +1266,28 @@ export async function handleCallback(actor: TelegramActor, callbackData: string)
   }
 
   const template = classTemplates[classKey];
+  const plan = buildRolledCharacterPlan(template);
 
   await upsertActiveSession({
     userId: user.id,
     flowType: "character_creation",
-    stepKey: "awaiting_name",
+    stepKey: "awaiting_roll_choice",
     data: {
       classKey: template.classKey,
+      abilityScores: plan.abilityScores,
+      derivedStats: plan.derivedStats,
+      rollDetails: plan.details,
+      rerollsRemaining: 1,
     },
   });
 
   return {
     alertText: `${template.label} selected`,
     message: {
-      text: [
-        `${template.label} selected.`,
-        template.summary,
-        "",
-        "Send the name you want your arena character to use.",
-      ].join("\n"),
+      text: formatRollPlan(template, plan, 1),
+      replyMarkup: {
+        inline_keyboard: rollButtons(true),
+      },
     },
   };
 }
@@ -912,45 +1337,29 @@ export async function handleTextMessage(
   }
 
   const template = classTemplates[classKey];
-  const rulesVersion = await ensureRulesVersion({
-    versionKey: "arena-v1-alpha",
-    summary: "Initial starter rules for automated 1v1 arbitration combat.",
-    config: rulesConfigSnapshot(),
-  });
+  const abilityScores = session.data.abilityScores as CharacterTemplate["abilityScores"] | undefined;
+  const derivedStats = session.data.derivedStats as CharacterTemplate["derivedStats"] | undefined;
 
-  const character = await createCharacterAndCompleteSession({
+  if (!abilityScores || !derivedStats) {
+    return {
+      text: "Your rolled stats are missing. Please restart with /create_character.",
+    };
+  }
+
+  await upsertActiveSession({
     userId: user.id,
-    name: proposedName,
-    classKey: template.classKey,
-    level: template.level,
-    rulesVersionId: rulesVersion.id,
-    abilityScores: template.abilityScores,
-    derivedStats: template.derivedStats,
-    loadout: template.loadout,
-    resourceState: template.resourceState,
-  });
-
-  await createAuditLog({
-    actorType: "user",
-    actorUserId: user.id,
-    action: "character_created",
-    targetType: "character",
-    targetId: character.id,
-    metadata: {
-      characterName: character.name,
-      classKey: character.class_key,
-      level: character.level,
+    flowType: "character_creation",
+    stepKey: "awaiting_confirmation",
+    data: {
+      ...session.data,
+      pendingName: proposedName,
     },
   });
 
   return {
-    text: [
-      "Your character is ready.",
-      "",
-      formatCharacterSummary(character),
-    ].join("\n"),
+    text: formatCharacterPreview(template, proposedName, abilityScores, derivedStats),
     replyMarkup: {
-      inline_keyboard: [[{ text: "View Character", callback_data: "nav:character" }]],
+      inline_keyboard: confirmCharacterButtons(),
     },
   };
 }
