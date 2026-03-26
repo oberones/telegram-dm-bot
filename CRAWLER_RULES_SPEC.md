@@ -240,12 +240,15 @@ Alternative voting systems should wait until later.
 
 Recommended v1 retreat rule:
 
-- retreat is allowed only from designated safe decision points, not from every combat turn
+- retreat can be attempted between combat rounds
+- retreat requires unanimous party action
+- retreat triggers break-engagement attacks before the party escapes
+- if at least one party member survives the break, the party falls back to the previous room with current HP preserved
 
 Reason:
 
-- keeps flow simpler
-- prevents degenerate spam exits
+- keeps combat interactive without requiring per-turn tactical input
+- preserves real combat risk when disengaging
 
 ---
 

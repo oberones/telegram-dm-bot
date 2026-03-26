@@ -58,6 +58,12 @@ export type EncounterEvent =
       summary: string;
     }
   | {
+      type: "retreat";
+      round: number;
+      succeeded: boolean;
+      summary: string;
+    }
+  | {
       type: "encounter_end";
       winningSide: EncounterSide;
       roundsCompleted: number;
@@ -91,10 +97,41 @@ export type ResolveEncounterInput = {
   roundLimit?: number;
 };
 
-type MutableEncounterParticipant = EncounterParticipant & {
+export type EncounterStateParticipant = EncounterParticipant & {
   currentHitPoints: number;
   damageDealt: number;
 };
+
+export type EncounterState = {
+  participants: EncounterStateParticipant[];
+  order: string[];
+  initiativeRolls: Record<string, number>;
+  nextRound: number;
+  roundLimit: number;
+};
+
+export type EncounterStateInitialization = {
+  state: EncounterState;
+  events: EncounterEvent[];
+};
+
+export type EncounterRoundResult = {
+  state: EncounterState;
+  events: EncounterEvent[];
+  finalParticipants: EncounterResultParticipant[];
+  winningSide: EncounterSide | null;
+  roundsCompleted: number;
+};
+
+export type EncounterRetreatResult = {
+  state: EncounterState;
+  events: EncounterEvent[];
+  finalParticipants: EncounterResultParticipant[];
+  succeeded: boolean;
+  winningSide: EncounterSide | null;
+};
+
+type MutableEncounterParticipant = EncounterStateParticipant;
 
 const defaultRandomSource: RandomSource = {
   rollDie: (sides) => Math.floor(Math.random() * sides) + 1,
@@ -124,16 +161,14 @@ export function isEncounterResolved(snapshot: EncounterSnapshot): boolean {
   return livingSides.size <= 1;
 }
 
-export function resolveEncounter(input: ResolveEncounterInput): EncounterResolutionResult {
+export function initializeEncounterState(input: ResolveEncounterInput): EncounterStateInitialization {
   const rng = input.rng ?? defaultRandomSource;
-  const roundLimit = input.roundLimit ?? 12;
   const participants = input.participants.map((participant) => ({
     ...participant,
     currentHitPoints: participant.hitPoints,
     damageDealt: 0,
   }));
   const events: EncounterEvent[] = [];
-
   const initiativeRolls = Object.fromEntries(
     participants.map((participant) => [participant.id, rng.rollDie(20)]),
   );
@@ -160,114 +195,197 @@ export function resolveEncounter(input: ResolveEncounterInput): EncounterResolut
     });
   }
 
-  for (let round = 1; round <= roundLimit; round += 1) {
-    for (const participantId of order) {
-      const actor = participants.find((participant) => participant.id === participantId);
+  return {
+    state: {
+      participants,
+      order,
+      initiativeRolls,
+      nextRound: 1,
+      roundLimit: input.roundLimit ?? 12,
+    },
+    events,
+  };
+}
 
-      if (!actor || actor.currentHitPoints <= 0) {
-        continue;
-      }
+export function resolveEncounterRound(
+  state: EncounterState,
+  rng: RandomSource = defaultRandomSource,
+): EncounterRoundResult {
+  const participants = cloneStateParticipants(state.participants);
+  const round = state.nextRound;
+  const events: EncounterEvent[] = [];
 
-      const target = chooseTarget(participants, actor.side);
+  for (const participantId of state.order) {
+    const actor = participants.find((participant) => participant.id === participantId);
 
-      if (!target) {
-        const winningSide = actor.side;
-        events.push({
-          type: "encounter_end",
-          winningSide,
-          roundsCompleted: round - 1,
-          summary: `${winningSide === "player" ? "The party" : "The monsters"} win the encounter.`,
-        });
+    if (!actor || actor.currentHitPoints <= 0) {
+      continue;
+    }
 
-        return {
-          winningSide,
-          roundsCompleted: round - 1,
-          events,
-          finalParticipants: participants.map(toResultParticipant),
-        };
-      }
+    const target = chooseTarget(participants, actor.side);
 
+    if (!target) {
+      return {
+        state: {
+          ...state,
+          participants,
+        },
+        events,
+        finalParticipants: participants.map(toResultParticipant),
+        winningSide: actor.side,
+        roundsCompleted: round - 1,
+      };
+    }
+
+    events.push({
+      type: "turn_start",
+      round,
+      participantId: actor.id,
+      summary: `Round ${round}: ${actor.name} acts.`,
+    });
+
+    performAttack(participants, actor, target, round, rng, events);
+
+    const winningSide = checkWinningSide(participants);
+
+    if (winningSide) {
       events.push({
-        type: "turn_start",
-        round,
-        participantId: actor.id,
-        summary: `Round ${round}: ${actor.name} acts.`,
+        type: "encounter_end",
+        winningSide,
+        roundsCompleted: round,
+        summary: `${winningSide === "player" ? "The party" : "The monsters"} win the encounter.`,
       });
 
-      const attackRoll = rng.rollDie(20);
-      const total = attackRoll + actor.attackModifier;
-      const isHit = total >= target.armorClass;
-
-      events.push({
-        type: "attack",
-        round,
-        participantId: actor.id,
-        targetId: target.id,
-        attackRoll,
-        attackModifier: actor.attackModifier,
-        total,
-        targetArmorClass: target.armorClass,
-        isHit,
-        summary: `${actor.name} attacks ${target.name}: d20=${attackRoll} + ${actor.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
-      });
-
-      if (!isHit) {
-        continue;
-      }
-
-      const rolls = Array.from({ length: actor.damageDiceCount }, () => rng.rollDie(actor.damageDieSides));
-      const totalDamage = rolls.reduce((sum, value) => sum + value, 0) + actor.damageModifier;
-      const before = target.currentHitPoints;
-      target.currentHitPoints = Math.max(0, target.currentHitPoints - totalDamage);
-      actor.damageDealt += totalDamage;
-
-      events.push({
-        type: "damage",
-        round,
-        participantId: actor.id,
-        targetId: target.id,
-        rolls,
-        modifier: actor.damageModifier,
-        total: totalDamage,
-        targetHpBefore: before,
-        targetHpAfter: target.currentHitPoints,
-        summary: `${actor.name} deals ${totalDamage} damage to ${target.name} (${before} -> ${target.currentHitPoints}).`,
-      });
-
-      const winningSide = checkWinningSide(participants);
-
-      if (winningSide) {
-        events.push({
-          type: "encounter_end",
-          winningSide,
-          roundsCompleted: round,
-          summary: `${winningSide === "player" ? "The party" : "The monsters"} win the encounter.`,
-        });
-
-        return {
-          winningSide,
-          roundsCompleted: round,
-          events,
-          finalParticipants: participants.map(toResultParticipant),
-        };
-      }
+      return {
+        state: {
+          ...state,
+          participants,
+          nextRound: round + 1,
+        },
+        events,
+        finalParticipants: participants.map(toResultParticipant),
+        winningSide,
+        roundsCompleted: round,
+      };
     }
   }
 
-  const winningSide = survivingHitPointLeader(participants);
+  if (round >= state.roundLimit) {
+    const winningSide = survivingHitPointLeader(participants);
+    events.push({
+      type: "encounter_end",
+      winningSide,
+      roundsCompleted: round,
+      summary: `${winningSide === "player" ? "The party" : "The monsters"} win after a prolonged battle.`,
+    });
+
+    return {
+      state: {
+        ...state,
+        participants,
+        nextRound: round + 1,
+      },
+      events,
+      finalParticipants: participants.map(toResultParticipant),
+      winningSide,
+      roundsCompleted: round,
+    };
+  }
+
+  return {
+    state: {
+      ...state,
+      participants,
+      nextRound: round + 1,
+    },
+    events,
+    finalParticipants: participants.map(toResultParticipant),
+    winningSide: null,
+    roundsCompleted: round,
+  };
+}
+
+export function resolveRetreatAttempt(
+  state: EncounterState,
+  rng: RandomSource = defaultRandomSource,
+): EncounterRetreatResult {
+  const participants = cloneStateParticipants(state.participants);
+  const round = state.nextRound;
+  const events: EncounterEvent[] = [];
+  const livingPlayers = participants.filter((participant) => participant.side === "player" && participant.currentHitPoints > 0);
+  const livingMonsters = participants.filter((participant) => participant.side === "monster" && participant.currentHitPoints > 0);
+
+  for (const monster of livingMonsters) {
+    const target = chooseTarget(participants, monster.side);
+
+    if (!target) {
+      break;
+    }
+
+    performAttack(
+      participants,
+      monster,
+      target,
+      round,
+      rng,
+      events,
+      `${monster.name} lashes out with an opportunity attack at ${target.name}.`,
+    );
+  }
+
+  const survivingPlayers = participants.filter((participant) => participant.side === "player" && participant.currentHitPoints > 0);
+  const success = livingPlayers.length > 0 && survivingPlayers.length > 0;
   events.push({
-    type: "encounter_end",
-    winningSide,
-    roundsCompleted: roundLimit,
-    summary: `${winningSide === "player" ? "The party" : "The monsters"} win after a prolonged battle.`,
+    type: "retreat",
+    round,
+    succeeded: success,
+    summary: success
+      ? "The party breaks engagement and falls back to the previous room."
+      : "The party is cut down while trying to retreat.",
   });
 
   return {
-    winningSide,
-    roundsCompleted: roundLimit,
+    state: {
+      ...state,
+      participants,
+    },
     events,
     finalParticipants: participants.map(toResultParticipant),
+    succeeded: success,
+    winningSide: success ? null : "monster",
   };
+}
+
+export function resolveEncounter(input: ResolveEncounterInput): EncounterResolutionResult {
+  const rng = input.rng ?? defaultRandomSource;
+  const initialized = initializeEncounterState(input);
+  const events = [...initialized.events];
+  let state = initialized.state;
+
+  while (true) {
+    const roundResult = resolveEncounterRound(state, rng);
+    events.push(...roundResult.events);
+    state = roundResult.state;
+
+    if (roundResult.winningSide) {
+      return {
+        winningSide: roundResult.winningSide,
+        roundsCompleted: roundResult.roundsCompleted,
+        events,
+        finalParticipants: roundResult.finalParticipants,
+      };
+    }
+
+    if (state.nextRound > state.roundLimit) {
+      const winningSide = survivingHitPointLeader(state.participants);
+      return {
+        winningSide,
+        roundsCompleted: state.roundLimit,
+        events,
+        finalParticipants: state.participants.map(toResultParticipant),
+      };
+    }
+  }
 }
 
 export function createDeterministicRandomSource(rolls: number[]): RandomSource {
@@ -287,6 +405,10 @@ export function createDeterministicRandomSource(rolls: number[]): RandomSource {
   };
 }
 
+function cloneStateParticipants(participants: EncounterStateParticipant[]): MutableEncounterParticipant[] {
+  return participants.map((participant) => ({ ...participant }));
+}
+
 function chooseTarget(
   participants: MutableEncounterParticipant[],
   actingSide: EncounterSide,
@@ -300,6 +422,65 @@ function chooseTarget(
 
       return left.name.localeCompare(right.name);
     })[0];
+}
+
+function performAttack(
+  participants: MutableEncounterParticipant[],
+  actor: MutableEncounterParticipant,
+  target: MutableEncounterParticipant,
+  round: number,
+  rng: RandomSource,
+  events: EncounterEvent[],
+  openingSummary?: string,
+) {
+  if (openingSummary) {
+    events.push({
+      type: "turn_start",
+      round,
+      participantId: actor.id,
+      summary: openingSummary,
+    });
+  }
+
+  const attackRoll = rng.rollDie(20);
+  const total = attackRoll + actor.attackModifier;
+  const isHit = total >= target.armorClass;
+
+  events.push({
+    type: "attack",
+    round,
+    participantId: actor.id,
+    targetId: target.id,
+    attackRoll,
+    attackModifier: actor.attackModifier,
+    total,
+    targetArmorClass: target.armorClass,
+    isHit,
+    summary: `${actor.name} attacks ${target.name}: d20=${attackRoll} + ${actor.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
+  });
+
+  if (!isHit) {
+    return;
+  }
+
+  const rolls = Array.from({ length: actor.damageDiceCount }, () => rng.rollDie(actor.damageDieSides));
+  const totalDamage = rolls.reduce((sum, value) => sum + value, 0) + actor.damageModifier;
+  const before = target.currentHitPoints;
+  target.currentHitPoints = Math.max(0, target.currentHitPoints - totalDamage);
+  actor.damageDealt += totalDamage;
+
+  events.push({
+    type: "damage",
+    round,
+    participantId: actor.id,
+    targetId: target.id,
+    rolls,
+    modifier: actor.damageModifier,
+    total: totalDamage,
+    targetHpBefore: before,
+    targetHpAfter: target.currentHitPoints,
+    summary: `${actor.name} deals ${totalDamage} damage to ${target.name} (${before} -> ${target.currentHitPoints}).`,
+  });
 }
 
 function checkWinningSide(participants: MutableEncounterParticipant[]): EncounterSide | null {

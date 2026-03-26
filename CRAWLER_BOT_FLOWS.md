@@ -376,28 +376,25 @@ Rolling initiative...
 
 After initiative:
 
-- post combat turn order summary
-- prompt the first player if a player turn starts
+- post the round summary
+- let the party choose whether to continue the fight or attempt a retreat before the next round
 
 ---
 
-## 12. Combat Turn Flow
+## 12. Combat Round Flow
 
-### Turn Prompt
+### Round Prompt
 
-The active player receives:
+The party receives:
 
-- whose turn it is
-- current HP/resources
+- current party HP/resources
 - visible enemy state summary
-- buttons for valid actions
+- buttons for round actions
 
 ### Recommended Action Buttons
 
 - `Attack`
-- `Spell`
-- `Use Item`
-- `Defend`
+- `Vote Retreat`
 - `Details`
 
 ### Target Selection
@@ -412,14 +409,22 @@ Example:
 - `Target Skeleton Guard B`
 - `Target Grave Acolyte`
 
-### Turn Timeout
+### Retreat Vote
+
+Recommended v1:
+
+- retreat requires a unanimous party vote
+- when the final vote arrives, enemies get break-engagement attacks before the party escapes
+- on success the party returns to the previous room with current HP preserved
+
+### Round Timeout
 
 Recommended v1:
 
 - generous timeout with reminder
 - admin recovery if truly stuck
 
-Do not auto-play a player’s turn too aggressively in early versions.
+Do not auto-play combat rounds too aggressively in early versions.
 
 ---
 
@@ -609,13 +614,14 @@ Bot should clearly state:
 
 ### Purpose
 
-Let parties exit runs from safe points.
+Let parties exit runs either from safe points or by unanimously breaking contact between combat rounds.
 
 ### Rule
 
 Recommended v1:
 
-- retreat allowed only outside active encounters
+- outside encounters, retreat still abandons the run
+- during active encounters, retreat is only available between rounds and requires unanimous party action
 
 ### Confirmation
 
@@ -631,6 +637,12 @@ If confirmed:
 - run ends as `abandoned` or `retreated`
 - already banked rewards remain
 - unresolved future content is lost
+
+If attempted during combat:
+
+- enemies make break-engagement attacks first
+- on success the party returns to the previous room with current HP preserved
+- if the party is dropped while escaping, the run fails
 
 ---
 

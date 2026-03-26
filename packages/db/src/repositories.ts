@@ -2751,6 +2751,7 @@ export async function updateEncounter(params: {
   encounterId: string;
   status?: EncounterRecord["status"];
   errorSummary?: string | null;
+  encounterSnapshot?: Record<string, unknown>;
 }): Promise<EncounterRecord | null> {
   return withTransaction(async (client) => {
     const result = await client.query<EncounterRecord>(
@@ -2761,11 +2762,12 @@ export async function updateEncounter(params: {
           completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
           errored_at = CASE WHEN $2 = 'error' THEN NOW() ELSE errored_at END,
           error_summary = COALESCE($3, error_summary),
+          encounter_snapshot = COALESCE($4, encounter_snapshot),
           updated_at = NOW()
         WHERE id = $1
         RETURNING *
       `,
-      [params.encounterId, params.status ?? null, params.errorSummary ?? null],
+      [params.encounterId, params.status ?? null, params.errorSummary ?? null, params.encounterSnapshot ?? null],
     );
 
     return result.rows[0] ?? null;
