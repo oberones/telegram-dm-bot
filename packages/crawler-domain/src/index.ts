@@ -1965,7 +1965,7 @@ export async function handleCrawlerCallback(
     });
 
     const seed = randomUUID();
-    const generated = generateRun(seed);
+    const generated = generateRun(seed, members.length);
     const run = await createAdventureRun({
       partyId: party.id,
       seed,

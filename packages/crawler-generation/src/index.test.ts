@@ -48,6 +48,45 @@ test("generateRun starts with a combat room and ends with a boss room", () => {
   assert.equal(allRooms.at(-1)?.roomType, "boss");
 });
 
+test("generateRun scales encounter groups to party size", () => {
+  const solo = generateRun("seed-gamma", 1);
+  const party = generateRun("seed-gamma", 3);
+  const soloRooms = solo.floors.flatMap((floor) => floor.rooms);
+  const partyRooms = party.floors.flatMap((floor) => floor.rooms);
+  const soloFirstCombat = soloRooms.find((room) => room.roomType === "combat");
+  const partyFirstCombat = partyRooms.find((room) => room.roomType === "combat");
+  const soloBoss = soloRooms.at(-1);
+  const partyBoss = partyRooms.at(-1);
+
+  assert.ok(soloFirstCombat);
+  assert.ok(partyFirstCombat);
+  assert.ok(soloBoss);
+  assert.ok(partyBoss);
+  const soloEncounterKeys = getEncounterMonsterKeys(soloFirstCombat.generationPayload);
+  const partyEncounterKeys = getEncounterMonsterKeys(partyFirstCombat.generationPayload);
+  const soloBossKeys = getEncounterMonsterKeys(soloBoss.generationPayload);
+  const partyBossKeys = getEncounterMonsterKeys(partyBoss.generationPayload);
+
+  assert.equal(soloEncounterKeys.length, 1);
+  assert.ok(partyEncounterKeys.length >= 1);
+  assert.ok(
+    partyEncounterKeys.length >= soloEncounterKeys.length,
+  );
+  assert.ok(partyBossKeys.length >= soloBossKeys.length);
+});
+
+function getEncounterMonsterKeys(payload: unknown): string[] {
+  assert.ok(payload && typeof payload === "object");
+  assert.ok("encounterMonsterKeys" in payload);
+
+  const { encounterMonsterKeys } = payload as { encounterMonsterKeys: unknown };
+
+  assert.ok(Array.isArray(encounterMonsterKeys));
+  assert.ok(encounterMonsterKeys.every((value) => typeof value === "string"));
+
+  return encounterMonsterKeys;
+}
+
 test("generateEncounterRewards is deterministic for a given seed", () => {
   const first = generateEncounterRewards("reward-seed", "elite_combat", 2);
   const second = generateEncounterRewards("reward-seed", "elite_combat", 2);

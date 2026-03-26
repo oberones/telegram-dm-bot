@@ -231,7 +231,7 @@ export function buildRoomWeightsForTheme(themeKey: CrawlerThemeKey): RoomWeightT
   return merged;
 }
 
-export function generateRun(seed: string): GeneratedRun {
+export function generateRun(seed: string, partySize = 1): GeneratedRun {
   const theme = selectThemeFromSeed(seed);
   const rng = createRng(seed);
   const floorCount = 3;
@@ -263,7 +263,7 @@ export function generateRun(seed: string): GeneratedRun {
           floorNumber,
           roomNumber,
           roomType,
-          encounterMonsterKeys: buildEncounterMonsterKeys(theme.key, roomType, rng),
+          encounterMonsterKeys: buildEncounterMonsterKeys(theme.key, roomType, rng, partySize),
         },
       });
     }
@@ -454,6 +454,7 @@ function buildEncounterMonsterKeys(
   themeKey: CrawlerThemeKey,
   roomType: CrawlerRoomType,
   rng: () => number,
+  partySize: number,
 ) {
   if (!["combat", "elite_combat", "boss"].includes(roomType)) {
     return [] as string[];
@@ -465,18 +466,26 @@ function buildEncounterMonsterKeys(
   const bossMonsters = themeMonsters.filter((template) => template.role === "boss");
 
   if (roomType === "boss") {
-    return [bossMonsters[0]?.key ?? normalMonsters[0]?.key ?? "giant_rat"];
+    const bossKey = bossMonsters[0]?.key ?? normalMonsters[0]?.key ?? "giant_rat";
+    const minionCount = Math.max(0, Math.min(2, partySize - 1));
+    const supportingKeys = pickDistinctMonsterKeys(normalMonsters, rng, minionCount)
+      .filter((key) => key !== bossKey);
+
+    return [bossKey, ...supportingKeys];
   }
 
   if (roomType === "elite_combat") {
     if (eliteMonsters[0]) {
-      return [eliteMonsters[0].key];
+      const supportCount = Math.max(0, Math.min(1, partySize - 1));
+      const supportingKeys = pickDistinctMonsterKeys(normalMonsters, rng, supportCount)
+        .filter((key) => key !== eliteMonsters[0]?.key);
+      return [eliteMonsters[0].key, ...supportingKeys];
     }
 
-    return pickDistinctMonsterKeys(normalMonsters, rng, 2);
+    return pickDistinctMonsterKeys(normalMonsters, rng, Math.max(1, Math.min(normalMonsters.length, partySize)));
   }
 
-  const count = rng() > 0.6 ? 2 : 1;
+  const count = Math.max(1, Math.min(normalMonsters.length, partySize));
   return pickDistinctMonsterKeys(normalMonsters, rng, count);
 }
 

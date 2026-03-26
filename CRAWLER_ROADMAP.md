@@ -36,6 +36,28 @@ The crawler MVP should optimize for:
 
 It does not need to begin as a fully featured roguelike.
 
+### Current Progress Snapshot
+
+Crawler mode has moved well past planning and into a playable prototype.
+
+Completed so far:
+
+- crawler planning set is complete
+- crawler schema baseline and package foundations are in place
+- `/party` create/join/ready/leave/start-run works in Telegram groups
+- seeded procedural runs generate and persist floors and rooms
+- PvE encounters resolve and persist encounter logs
+- non-combat room flow exists for treasure, event, and rest rooms
+- persistent rewards, inventory, equipment, consumables, and cumulative gold are implemented
+- admin visibility exists for parties, runs, rewards, inventory, and loadouts
+
+Still not complete:
+
+- `/run` resume and re-entry flow
+- crawler-specific recovery actions for stuck runs/encounters/rewards
+- crawler-specific audit coverage and operational runbooks
+- crawler Alpha/Beta hardening and release work
+
 ---
 
 ## 3. Phase Summary
@@ -66,7 +88,7 @@ Each phase below includes:
 
 ## 4. Phase C0: Scope Lock and Platform Alignment
 
-Status: [ ] Pending
+Status: [x] Complete
 
 ### Objective
 
@@ -124,7 +146,7 @@ Confirm the technical boundaries in:
 
 ## 5. Phase C1: Schema and Package Foundations
 
-Status: [ ] Pending
+Status: [x] Complete
 
 ### Objective
 
@@ -201,7 +223,7 @@ Create initial content formats for:
 
 ## 6. Phase C2: Party Formation and Run Skeleton
 
-Status: [ ] Pending
+Status: [x] Complete
 
 ### Objective
 
@@ -269,7 +291,7 @@ Add read-only admin views for:
 
 ## 7. Phase C3: Procedural Dungeon Generation v1
 
-Status: [ ] Pending
+Status: [x] Complete
 
 ### Objective
 
@@ -338,7 +360,7 @@ Implement initial room resolution for:
 
 ## 8. Phase C4: PvE Encounter Engine v1
 
-Status: [ ] Pending
+Status: [x] Complete
 
 ### Objective
 
@@ -411,7 +433,7 @@ Recommended first cut:
 
 ## 9. Phase C5: Room Flow, Rewards, and Inventory
 
-Status: [ ] Pending
+Status: [ ] In Progress
 
 ### Objective
 
