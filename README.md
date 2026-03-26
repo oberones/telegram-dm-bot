@@ -25,8 +25,8 @@ The current product supports:
 - A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, and persistent loot
 - Read-only and operational admin views for users, characters, disputes, matches, recovery state, and audit logs
 - Admin moderation actions such as suspend/reactivate user and freeze/unfreeze character
-- Admin recovery actions such as cancel pending dispute, cancel/finalize flagged match, and fail stuck crawler runs
-- Crawler admin views for parties, active runs, rewards, inventory, loadouts, and conservative run recovery
+- Admin recovery actions such as cancel pending dispute, cancel/finalize flagged match, fail stuck crawler runs, and mark stuck crawler encounters errored
+- Crawler admin views for parties, active runs, rewards, inventory, loadouts, and conservative run/encounter recovery
 
 ## Repository Layout
 
@@ -300,9 +300,10 @@ The admin panel currently supports:
 - parties list
 - active runs list
 - run reward ledger views
+- run recovery detail with encounter and reward anomaly visibility
 - character crawler inventory and loadout detail
 - audit log view
-- recovery view for pending disputes and flagged matches
+- recovery view for pending disputes, flagged matches, and crawler incidents
 - user suspension/reactivation
 - character freeze/unfreeze
 - dispute cancellation
@@ -334,6 +335,7 @@ Current notable backend endpoints:
 - `GET /api/parties`
 - `GET /api/runs`
 - `GET /api/runs/:id/rewards`
+- `GET /api/runs/:id/recovery`
 - `GET /api/characters/:id/crawler-loadout`
 - operational admin mutation routes for recovery and moderation
 
@@ -413,7 +415,7 @@ This is still a Beta-hardening project. Review the deployment and runbook docs b
 
 - The combat ruleset is intentionally bounded and does not implement full 5e.
 - The crawler is playable, but it is still a prototype expansion rather than a hardened second product line.
-- `/run` recovery is conservative today and fuller crawler recovery tooling is not complete yet.
+- `/run` and crawler admin recovery are conservative today, and reward-reconciliation/runbook coverage is still not complete yet.
 - The server is a modular monolith, not a horizontally scaled distributed system.
 - Telegram delivery idempotency is now tracked at webhook ingress, but broader retry/reconciliation hardening is still part of Beta work.
 - The admin panel is operationally useful, but not yet a full-featured back-office product.

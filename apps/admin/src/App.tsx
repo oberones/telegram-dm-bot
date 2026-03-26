@@ -114,6 +114,38 @@ type RunReward = {
   created_at: string;
 };
 
+type RunRecoveryEncounter = {
+  id: string;
+  room_id: string;
+  status: string;
+  encounter_key: string;
+  error_summary: string | null;
+  recovery_hint: string;
+};
+
+type RunRecoverySummary = {
+  granted: number;
+  pending: number;
+  revoked: number;
+  anomalies: string[];
+};
+
+type RunRecoveryDetailResponse = {
+  run: RunSummary;
+  currentRoom: null | {
+    id: string;
+    floor_number: number;
+    room_number: number;
+    room_type: string;
+    status: string;
+    resolved_at: string | null;
+  };
+  recovery_hint: string;
+  encounters: RunRecoveryEncounter[];
+  rewards: RunReward[];
+  reward_summary: RunRecoverySummary;
+};
+
 type CharacterLoadoutDetail = {
   id: string;
   slot: string;
@@ -293,6 +325,7 @@ export function App() {
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
   const [matchDetail, setMatchDetail] = useState<MatchDetailResponse | null>(null);
   const [runRewards, setRunRewards] = useState<RunReward[]>([]);
+  const [runRecoveryDetail, setRunRecoveryDetail] = useState<RunRecoveryDetailResponse | null>(null);
   const [characterLoadout, setCharacterLoadout] = useState<CharacterCrawlerLoadoutResponse | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -357,6 +390,7 @@ export function App() {
       setMatchDetail(null);
       setSelectedRunId(null);
       setRunRewards([]);
+      setRunRecoveryDetail(null);
       setSelectedCharacterId(null);
       setCharacterLoadout(null);
       return;
@@ -388,15 +422,18 @@ export function App() {
   useEffect(() => {
     if (!session?.authenticated || !selectedRunId) {
       setRunRewards([]);
+      setRunRecoveryDetail(null);
       return;
     }
 
-    fetchJson<{ rewards: RunReward[] }>(`/api/runs/${selectedRunId}/rewards`)
+    fetchJson<RunRecoveryDetailResponse>(`/api/runs/${selectedRunId}/recovery`)
       .then((response) => {
+        setRunRecoveryDetail(response);
         setRunRewards(response.rewards);
       })
       .catch(() => {
         setRunRewards([]);
+        setRunRecoveryDetail(null);
       });
   }, [selectedRunId, session]);
 
@@ -588,6 +625,30 @@ export function App() {
       setSelectedRunId(runId);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Crawler run recovery failed");
+    }
+  }
+
+  async function markCrawlerEncounterErrored(encounterId: string) {
+    const reason = window.prompt("Why are you marking this crawler encounter errored?")?.trim();
+
+    if (!reason) {
+      setError("An encounter recovery reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/encounters/${encounterId}/error`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await refreshAdminData();
+      if (selectedRunId) {
+        const refreshed = await fetchJson<RunRecoveryDetailResponse>(`/api/runs/${selectedRunId}/recovery`);
+        setRunRecoveryDetail(refreshed);
+        setRunRewards(refreshed.rewards);
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Crawler encounter recovery failed");
     }
   }
 
@@ -990,6 +1051,67 @@ export function App() {
                 </div>
               ) : null}
             </div>
+          </article>
+
+          <article className="panel">
+            <header className="panel-header">
+              <h2>Run recovery detail</h2>
+              <span>{selectedRunId ? selectedRunId.slice(0, 8) : "none"}</span>
+            </header>
+            {runRecoveryDetail ? (
+              <div className="stack-list">
+                <div className="list-row">
+                  <strong>{capitalize(runRecoveryDetail.run.status)}</strong>
+                  <span>{runRecoveryDetail.run.theme_key ?? "unknown"}</span>
+                  <p className="muted-copy">{runRecoveryDetail.recovery_hint}</p>
+                </div>
+
+                <div className="list-row">
+                  <strong>Current room</strong>
+                  <p>
+                    {runRecoveryDetail.currentRoom
+                      ? `Floor ${runRecoveryDetail.currentRoom.floor_number}, Room ${runRecoveryDetail.currentRoom.room_number} (${capitalize(runRecoveryDetail.currentRoom.room_type)})`
+                      : "No current room recorded"}
+                  </p>
+                </div>
+
+                <div className="list-row">
+                  <strong>Reward ledger</strong>
+                  <p>
+                    Granted: {runRecoveryDetail.reward_summary.granted} | Pending: {runRecoveryDetail.reward_summary.pending} | Revoked: {runRecoveryDetail.reward_summary.revoked}
+                  </p>
+                  {runRecoveryDetail.reward_summary.anomalies.length > 0
+                    ? runRecoveryDetail.reward_summary.anomalies.map((anomaly) => <p className="muted-copy" key={anomaly}>{anomaly}</p>)
+                    : <p className="muted-copy">No reward ledger anomalies detected.</p>}
+                </div>
+
+                <div className="list-row">
+                  <strong>Encounters</strong>
+                  {runRecoveryDetail.encounters.length > 0 ? (
+                    runRecoveryDetail.encounters.map((encounter) => (
+                      <div className="inline-actions" key={encounter.id}>
+                        <span>{encounter.id.slice(0, 8)} {capitalize(encounter.status)}</span>
+                        <span className="muted-copy">{encounter.recovery_hint}</span>
+                        {["active", "queued"].includes(encounter.status) ? (
+                          <button
+                            className="table-action"
+                            disabled={!moderationEnabled}
+                            onClick={() => void markCrawlerEncounterErrored(encounter.id)}
+                            type="button"
+                          >
+                            Mark errored
+                          </button>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p>No encounters recorded for this run yet.</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p>Select a crawler run to inspect encounters and reward recovery state.</p>
+            )}
           </article>
         </section>
       ) : null}

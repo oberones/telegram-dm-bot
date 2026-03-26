@@ -69,6 +69,7 @@ function buildTestApp(overrides?: Partial<NonNullable<Parameters<typeof register
     listPartyMemberDetails: async () => [],
     listActiveAdventureRuns: async () => [],
     getAdventureRunById: async () => null,
+    getEncounterById: async () => null,
     getPartyById: async () => null,
     getRunRoomDetailById: async () => null,
     listEncountersForRun: async () => [],
@@ -293,6 +294,90 @@ test("GET /api/runs/:id/rewards returns reward ledger rows for authenticated adm
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().rewards[0].reward_kind, "weapon");
+});
+
+test("GET /api/runs/:id/recovery returns crawler recovery detail for authenticated admins", async () => {
+  const { app } = buildTestApp({
+    getAdventureRunById: async () => ({
+      id: "run-1",
+      party_id: "party-1",
+      status: "paused",
+      seed: "seed-1",
+      generation_version: "crawler-v1",
+      theme_key: "crypt",
+      rules_version_id: "rules-1",
+      floor_count: 3,
+      current_floor_number: 1,
+      current_room_id: "room-1",
+      active_encounter_id: null,
+      difficulty_tier: 1,
+      summary: {},
+      started_at: new Date(),
+      completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    getRunRoomDetailById: async () => ({
+      id: "room-1",
+      run_id: "run-1",
+      floor_id: "floor-1",
+      floor_number: 1,
+      room_number: 2,
+      room_type: "combat",
+      status: "active",
+      template_key: "combat:test",
+      prompt_payload: {},
+      generation_payload: {},
+      entered_at: new Date(),
+      resolved_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    listEncountersForRun: async () => [{
+      id: "enc-1",
+      run_id: "run-1",
+      room_id: "room-1",
+      status: "error",
+      encounter_key: "combat:test",
+      encounter_snapshot: {},
+      started_at: new Date(),
+      completed_at: null,
+      errored_at: new Date(),
+      error_summary: "Combat lock detected",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }],
+    listRunRewardsForRun: async () => [{
+      id: "reward-1",
+      run_id: "run-1",
+      room_id: "room-1",
+      encounter_id: "enc-1",
+      recipient_user_id: "user-1",
+      recipient_character_id: "char-1",
+      loot_template_id: "loot-1",
+      reward_kind: "weapon",
+      status: "pending",
+      quantity: 1,
+      reward_payload: {
+        itemName: "Balanced Longsword",
+      },
+      granted_at: null,
+      revoked_at: null,
+      created_at: new Date(),
+    }],
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/runs/run-1/recovery",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().encounters[0].id, "enc-1");
+  assert.equal(response.json().reward_summary.pending, 1);
+  assert.match(response.json().encounters[0].recovery_hint, /Combat lock detected/);
 });
 
 test("GET /api/runs includes crawler recovery hints for authenticated admins", async () => {
@@ -708,4 +793,136 @@ test("POST /api/runs/:id/fail fails stuck crawler runs, audits, and notifies par
   assert.equal(auditCalls.length, 1);
   assert.equal(sentMessages.length, 2);
   assert.match(sentMessages[0]!.text, /closed a crawler run/);
+});
+
+test("POST /api/encounters/:id/error marks a stuck crawler encounter errored, pauses the run, audits, and notifies party members", async () => {
+  const auditCalls: unknown[] = [];
+  const { app, sentMessages } = buildTestApp({
+    getEncounterById: async () => ({
+      id: "encounter-1",
+      run_id: "run-1",
+      room_id: "room-1",
+      status: "active",
+      encounter_key: "combat:test",
+      encounter_snapshot: {},
+      started_at: new Date(),
+      completed_at: null,
+      errored_at: null,
+      error_summary: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    getAdventureRunById: async () => ({
+      id: "run-1",
+      party_id: "party-1",
+      status: "in_combat",
+      seed: "seed-1",
+      generation_version: "crawler-v1",
+      theme_key: "crypt",
+      rules_version_id: "rules-1",
+      floor_count: 3,
+      current_floor_number: 1,
+      current_room_id: "room-1",
+      active_encounter_id: "encounter-1",
+      difficulty_tier: 1,
+      summary: {},
+      started_at: new Date(),
+      completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    getPartyById: async () => ({
+      id: "party-1",
+      leader_user_id: "user-1",
+      status: "in_run",
+      active_run_id: "run-1",
+      party_name: "Crawler Party",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    listPartyMemberDetails: async () => [{
+      id: "member-1",
+      party_id: "party-1",
+      user_id: "user-1",
+      character_id: "char-1",
+      status: "ready",
+      joined_at: new Date(),
+      ready_at: new Date(),
+      left_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+      user_display_name: "Bilbo",
+      telegram_username: "bilbo",
+      character_name: "Rheen",
+      class_key: "fighter",
+    }],
+    updateEncounter: async () => ({
+      id: "encounter-1",
+      run_id: "run-1",
+      room_id: "room-1",
+      status: "error",
+      encounter_key: "combat:test",
+      encounter_snapshot: {},
+      started_at: new Date(),
+      completed_at: null,
+      errored_at: new Date(),
+      error_summary: "Combat lock detected",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    updateAdventureRun: async () => ({
+      id: "run-1",
+      party_id: "party-1",
+      status: "paused",
+      seed: "seed-1",
+      generation_version: "crawler-v1",
+      theme_key: "crypt",
+      rules_version_id: "rules-1",
+      floor_count: 3,
+      current_floor_number: 1,
+      current_room_id: "room-1",
+      active_encounter_id: null,
+      difficulty_tier: 1,
+      summary: {
+        adminRecovery: {
+          action: "encounter_marked_error_by_admin",
+        },
+      },
+      started_at: new Date(),
+      completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    getUserById: async (id: string) => ({
+      id,
+      telegram_user_id: `${id}-tg`,
+      telegram_username: null,
+      telegram_first_name: null,
+      telegram_last_name: null,
+      display_name: id,
+      status: "active",
+    }),
+    createAuditLog: async (params) => {
+      auditCalls.push(params);
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/encounters/encounter-1/error",
+    payload: {
+      reason: "Combat lock detected",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().encounter.status, "error");
+  assert.equal(response.json().run.status, "paused");
+  assert.equal(auditCalls.length, 1);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0]!.text, /paused a crawler run for recovery review/);
 });

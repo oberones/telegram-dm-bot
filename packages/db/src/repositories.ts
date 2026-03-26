@@ -2537,6 +2537,22 @@ export async function listEncountersForRun(runId: string): Promise<EncounterReco
   });
 }
 
+export async function getEncounterById(encounterId: string): Promise<EncounterRecord | null> {
+  return withTransaction(async (client) => {
+    const result = await client.query<EncounterRecord>(
+      `
+        SELECT *
+        FROM encounters
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [encounterId],
+    );
+
+    return result.rows[0] ?? null;
+  });
+}
+
 export async function createRunFloor(input: RunFloorInput): Promise<RunFloorRecord> {
   return withTransaction(async (client) => {
     const result = await client.query<RunFloorRecord>(

@@ -52,11 +52,12 @@ Completed so far:
 - admin visibility exists for parties, runs, rewards, inventory, and loadouts
 - `/run` resume and inspect flow exists with conservative recovery behavior
 - admin can now fail stuck crawler runs conservatively from the recovery surface
+- admin can now inspect encounter/reward recovery state and mark stuck encounters errored
 
 Still not complete:
 
-- broader crawler-specific recovery actions for stuck encounters/rewards
 - crawler-specific audit coverage and operational runbooks
+- deeper reward reconciliation and rollback-safe recovery actions
 - crawler Alpha/Beta hardening and release work
 
 ---

@@ -7,6 +7,7 @@ import {
   finalizeMatchByAdmin,
   getAdventureRunById,
   getCharacterById,
+  getEncounterById,
   getDashboardCounts,
   getDisputeById,
   getMatchById,
@@ -39,7 +40,13 @@ import { previewMatchResolution } from "@dm-bot/domain";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getAdminAuthContext, loginAdmin, logoutAdmin, requireAdminAuth, requireAdminRole } from "../../lib/admin-auth.js";
-import { explainFlaggedCrawlerRun, explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
+import {
+  explainFlaggedCrawlerEncounter,
+  explainFlaggedCrawlerRun,
+  explainFlaggedDispute,
+  explainFlaggedMatch,
+  summarizeCrawlerRewards,
+} from "./recovery.js";
 
 type AdminRouteAuthContext = {
   adminUser: {
@@ -72,6 +79,7 @@ type AdminRouteDeps = {
   listPartyMemberDetails: typeof listPartyMemberDetails;
   listActiveAdventureRuns: typeof listActiveAdventureRuns;
   getAdventureRunById: typeof getAdventureRunById;
+  getEncounterById: typeof getEncounterById;
   getPartyById: typeof getPartyById;
   getRunRoomDetailById: typeof getRunRoomDetailById;
   listEncountersForRun: typeof listEncountersForRun;
@@ -113,6 +121,7 @@ const defaultDeps: AdminRouteDeps = {
   listPartyMemberDetails,
   listActiveAdventureRuns,
   getAdventureRunById,
+  getEncounterById,
   getPartyById,
   getRunRoomDetailById,
   listEncountersForRun,
@@ -296,6 +305,57 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
 
     return {
       rewards: await deps.listRunRewardsForRun(id),
+    };
+  });
+
+  app.get("/api/runs/:id/recovery", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    const { id } = request.params as { id: string };
+    const run = await deps.getAdventureRunById(id);
+
+    if (!run) {
+      reply.code(404);
+      return {
+        error: "Crawler run not found",
+      };
+    }
+
+    const [currentRoom, encounters, rewards] = await Promise.all([
+      run.current_room_id ? deps.getRunRoomDetailById(run.current_room_id) : Promise.resolve(null),
+      deps.listEncountersForRun(run.id),
+      deps.listRunRewardsForRun(run.id),
+    ]);
+
+    const recoveryHint = explainFlaggedCrawlerRun({
+      status: run.status,
+      currentRoomId: run.current_room_id,
+      activeEncounterId: run.active_encounter_id,
+      failureReason: run.failure_reason,
+    });
+
+    return {
+      run: {
+        ...run,
+        recovery_hint: recoveryHint,
+      },
+      currentRoom,
+      recovery_hint: recoveryHint,
+      encounters: encounters.map((encounter) => ({
+        ...encounter,
+        recovery_hint: explainFlaggedCrawlerEncounter({
+          status: encounter.status,
+          errorSummary: encounter.error_summary,
+        }),
+      })),
+      rewards,
+      reward_summary: summarizeCrawlerRewards(rewards),
     };
   });
 
@@ -678,6 +738,121 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
 
     return {
       run: failedRun ?? run,
+    };
+  });
+
+  app.post("/api/encounters/:id/error", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+      reply.code(403);
+      return { error: "Your role cannot mark crawler encounters as errored" };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim();
+
+    if (!reason) {
+      reply.code(400);
+      return { error: "An encounter recovery reason is required" };
+    }
+
+    const encounter = await deps.getEncounterById(id);
+
+    if (!encounter) {
+      reply.code(404);
+      return { error: "Crawler encounter not found" };
+    }
+
+    if (["completed", "failed", "cancelled"].includes(encounter.status)) {
+      reply.code(409);
+      return { error: "Only queued, active, or errored encounters can be administratively marked" };
+    }
+
+    const run = await deps.getAdventureRunById(encounter.run_id);
+
+    if (!run) {
+      reply.code(404);
+      return { error: "Crawler run not found" };
+    }
+
+    if (["completed", "failed", "abandoned", "cancelled"].includes(run.status)) {
+      reply.code(409);
+      return { error: "The parent crawler run is already terminal" };
+    }
+
+    const party = await deps.getPartyById(run.party_id);
+
+    if (!party) {
+      reply.code(404);
+      return { error: "Crawler party not found" };
+    }
+
+    const members = await deps.listPartyMemberDetails(party.id);
+    const updatedEncounter = await deps.updateEncounter({
+      encounterId: encounter.id,
+      status: "error",
+      errorSummary: reason,
+    });
+
+    const pausedRun = await deps.updateAdventureRun({
+      runId: run.id,
+      status: "paused",
+      activeEncounterId: run.active_encounter_id === encounter.id ? null : run.active_encounter_id,
+      summary: {
+        ...(run.summary ?? {}),
+        adminRecovery: {
+          action: "encounter_marked_error_by_admin",
+          reason,
+          actorAdminUserId: auth.adminUser.id,
+          encounterId: encounter.id,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    await deps.createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: "crawler_encounter_marked_error_by_admin",
+      targetType: "encounter",
+      targetId: encounter.id,
+      reason,
+      metadata: {
+        runId: run.id,
+        roomId: encounter.room_id,
+        previousEncounterStatus: encounter.status,
+        previousRunStatus: run.status,
+      },
+    });
+
+    const notificationText = [
+      "An administrator paused a crawler run for recovery review.",
+      `Run: ${run.id}`,
+      `Encounter: ${encounter.id}`,
+      `Reason: ${reason}`,
+    ].join("\n");
+
+    for (const member of members) {
+      const user = await deps.getUserById(member.user_id);
+
+      if (user) {
+        await app.telegram.sendMessage(user.telegram_user_id, {
+          text: notificationText,
+        });
+      }
+    }
+
+    return {
+      encounter: updatedEncounter ?? encounter,
+      run: pausedRun ?? run,
     };
   });
 

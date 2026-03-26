@@ -1,4 +1,4 @@
-import type { AdventureRunRecord, MatchRecord } from "@dm-bot/db";
+import type { AdventureRunRecord, EncounterRecord, MatchRecord, RunRewardRecord } from "@dm-bot/db";
 
 export function explainFlaggedDispute(status: string) {
   if (status === "pending") {
@@ -67,4 +67,49 @@ export function explainFlaggedCrawlerRun(params: {
   }
 
   return "No crawler recovery action suggested.";
+}
+
+export function explainFlaggedCrawlerEncounter(params: {
+  status: EncounterRecord["status"];
+  errorSummary?: string | null;
+}) {
+  if (params.status === "error") {
+    return params.errorSummary?.trim() || "Encounter is errored and the parent run should remain paused until reviewed.";
+  }
+
+  if (params.status === "active") {
+    return "Encounter is still active. If players are stuck, mark it errored to pause the run conservatively.";
+  }
+
+  if (params.status === "queued") {
+    return "Encounter has not resolved yet and may be stale if the run is no longer progressing.";
+  }
+
+  if (params.status === "cancelled") {
+    return "Encounter was cancelled during recovery.";
+  }
+
+  return "No encounter recovery action suggested.";
+}
+
+export function summarizeCrawlerRewards(rewards: RunRewardRecord[]) {
+  const granted = rewards.filter((reward) => reward.status === "granted").length;
+  const pending = rewards.filter((reward) => reward.status === "pending").length;
+  const revoked = rewards.filter((reward) => reward.status === "revoked").length;
+  const anomalies: string[] = [];
+
+  if (pending > 0) {
+    anomalies.push(`${pending} reward ledger row(s) are still pending.`);
+  }
+
+  if (revoked > 0) {
+    anomalies.push(`${revoked} reward ledger row(s) were revoked and should be reviewed.`);
+  }
+
+  return {
+    granted,
+    pending,
+    revoked,
+    anomalies,
+  };
 }

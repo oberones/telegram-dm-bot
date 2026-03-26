@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { explainFlaggedCrawlerRun, explainFlaggedDispute, explainFlaggedMatch } from "./recovery.js";
+import {
+  explainFlaggedCrawlerEncounter,
+  explainFlaggedCrawlerRun,
+  explainFlaggedDispute,
+  explainFlaggedMatch,
+  summarizeCrawlerRewards,
+} from "./recovery.js";
 
 test("pending disputes get a recovery hint", () => {
   assert.match(explainFlaggedDispute("pending"), /Awaiting target response/);
@@ -60,5 +66,79 @@ test("combat or errored crawler runs get administrative failure hints", () => {
       failureReason: "Encounter snapshot is inconsistent.",
     }),
     "Encounter snapshot is inconsistent.",
+  );
+});
+
+test("active crawler encounters get a conservative error-marking hint", () => {
+  assert.match(
+    explainFlaggedCrawlerEncounter({
+      status: "active",
+      errorSummary: null,
+    }),
+    /mark it errored/i,
+  );
+});
+
+test("crawler reward summaries surface pending and revoked anomalies", () => {
+  assert.deepEqual(
+    summarizeCrawlerRewards([
+      {
+        id: "reward-1",
+        run_id: "run-1",
+        room_id: "room-1",
+        encounter_id: "enc-1",
+        recipient_user_id: "user-1",
+        recipient_character_id: "char-1",
+        loot_template_id: "loot-1",
+        reward_kind: "weapon",
+        status: "granted",
+        quantity: 1,
+        reward_payload: {},
+        granted_at: new Date(),
+        revoked_at: null,
+        created_at: new Date(),
+      },
+      {
+        id: "reward-2",
+        run_id: "run-1",
+        room_id: "room-1",
+        encounter_id: "enc-1",
+        recipient_user_id: "user-1",
+        recipient_character_id: "char-1",
+        loot_template_id: "loot-2",
+        reward_kind: "armor",
+        status: "pending",
+        quantity: 1,
+        reward_payload: {},
+        granted_at: null,
+        revoked_at: null,
+        created_at: new Date(),
+      },
+      {
+        id: "reward-3",
+        run_id: "run-1",
+        room_id: "room-2",
+        encounter_id: null,
+        recipient_user_id: "user-2",
+        recipient_character_id: "char-2",
+        loot_template_id: "loot-3",
+        reward_kind: "consumable",
+        status: "revoked",
+        quantity: 1,
+        reward_payload: {},
+        granted_at: new Date(),
+        revoked_at: new Date(),
+        created_at: new Date(),
+      },
+    ]),
+    {
+      granted: 1,
+      pending: 1,
+      revoked: 1,
+      anomalies: [
+        "1 reward ledger row(s) are still pending.",
+        "1 reward ledger row(s) were revoked and should be reviewed.",
+      ],
+    },
   );
 });
