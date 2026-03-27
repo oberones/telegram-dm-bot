@@ -364,7 +364,14 @@ Recommended v1 rule:
 - award XP only for won encounters
 - award XP only to party members still standing at the end of that encounter
 - do not alter gold or loot payout rules when XP is granted
-- crawler XP maps to progression tiers at fixed thresholds for visibility and future unlock planning, but does not change combat stats yet
+- crawler XP unlocks crawler-only milestone perks at fixed thresholds
+- milestone perks are automatic for now rather than player-selected
+- recommended v1 milestones:
+- `100 XP`: `Veteran's Grit` for `+2 max HP`
+- `250 XP`: `Deadeye` for `+1 attack`
+- `450 XP`: `Guarded Stance` for `+1 AC`
+- `700 XP`: `Battle Rhythm` for `+1 initiative`
+- these milestone perks apply only inside crawler runs and do not alter gold or loot payout rules
 
 Avoid full spellbook or feat complexity in crawler v1.
 

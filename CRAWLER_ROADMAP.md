@@ -48,7 +48,7 @@ Completed so far:
 - seeded procedural runs generate and persist floors and rooms
 - PvE encounters resolve and persist encounter logs
 - non-combat room flow exists for treasure, event, and rest rooms
-- persistent rewards, inventory, equipment, consumables, cumulative gold, encounter XP, run-based defeat tracking, and bounded healing are implemented
+- persistent rewards, inventory, equipment, consumables, cumulative gold, encounter XP, crawler milestone perks, run-based defeat tracking, and bounded healing are implemented
 - admin visibility exists for parties, runs, rewards, inventory, and loadouts
 - `/run` resume and inspect flow exists with conservative recovery behavior
 - admin can now fail stuck crawler runs conservatively from the recovery surface

@@ -321,6 +321,30 @@ function describeCrawlerProgression(totalXp: number) {
   };
 }
 
+function listUnlockedCrawlerPerks(totalXp: number) {
+  const normalizedXp = Math.max(0, Math.floor(totalXp));
+  const perks = [
+    { label: "Veteran's Grit", summary: "+2 max HP", unlockXp: 100 },
+    { label: "Deadeye", summary: "+1 attack", unlockXp: 250 },
+    { label: "Guarded Stance", summary: "+1 AC", unlockXp: 450 },
+    { label: "Battle Rhythm", summary: "+1 initiative", unlockXp: 700 },
+  ];
+
+  return perks.filter((perk) => normalizedXp >= perk.unlockXp);
+}
+
+function nextCrawlerPerk(totalXp: number) {
+  const normalizedXp = Math.max(0, Math.floor(totalXp));
+  const perks = [
+    { label: "Veteran's Grit", summary: "+2 max HP", unlockXp: 100 },
+    { label: "Deadeye", summary: "+1 attack", unlockXp: 250 },
+    { label: "Guarded Stance", summary: "+1 AC", unlockXp: 450 },
+    { label: "Battle Rhythm", summary: "+1 initiative", unlockXp: 700 },
+  ];
+
+  return perks.find((perk) => normalizedXp < perk.unlockXp) ?? null;
+}
+
 function emptyAdminData(): AdminData {
   return {
     dashboard: null,
@@ -1272,7 +1296,20 @@ export function App() {
                   <p>
                     {(() => {
                       const progression = describeCrawlerProgression(characterLoadout.character.crawler_xp);
-                      return `Arena Lv${characterLoadout.character.level} | Crawler T${progression.tier} | ${progression.nextTierXp === null ? `${progression.totalXp} XP (max tier)` : `${progression.totalXp}/${progression.nextTierXp} XP (${progression.xpToNextTier} to next tier)`}`;
+                      const upcomingPerk = nextCrawlerPerk(characterLoadout.character.crawler_xp);
+                      return `Arena Lv${characterLoadout.character.level} | ${progression.nextTierXp === null ? `${progression.totalXp} XP (max milestone)` : `${progression.totalXp}/${progression.nextTierXp} XP (${progression.xpToNextTier} to next milestone)`} | ${upcomingPerk ? `Next: ${upcomingPerk.label} @ ${upcomingPerk.unlockXp} XP` : "All milestone perks unlocked"}`;
+                    })()}
+                  </p>
+                </div>
+
+                <div className="list-row">
+                  <strong>Crawler Perks</strong>
+                  <p>
+                    {(() => {
+                      const perks = listUnlockedCrawlerPerks(characterLoadout.character.crawler_xp);
+                      return perks.length > 0
+                        ? perks.map((perk) => `${perk.label} (${perk.summary})`).join(" | ")
+                        : "No crawler milestone perks unlocked yet.";
                     })()}
                   </p>
                 </div>

@@ -61,7 +61,7 @@ import {
   type RunRoomDetailRecord,
   type RunRewardRecord,
 } from "@dm-bot/db";
-import { describeCrawlerProgression } from "@dm-bot/shared";
+import { describeCrawlerProgression, listUnlockedCrawlerPerks, sumCrawlerCombatBonuses } from "@dm-bot/shared";
 import {
   crawlerContentVersion,
   generateEncounterRewards,
@@ -622,6 +622,7 @@ function toPlayerEncounterParticipant(
     "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
   > = profileByClass[character.class_key] ?? defaultProfile;
   const equipmentEffect = extractEquipmentEffect(loadouts, character.class_key);
+  const progressionBonuses = sumCrawlerCombatBonuses(character.crawler_xp);
   const runEffectTotals = runEffects.reduce<EquipmentEffect>((totals, effect) => {
     if (effect.applicableClasses && !effect.applicableClasses.includes(character.class_key)) {
       return totals;
@@ -639,7 +640,7 @@ function toPlayerEncounterParticipant(
     maxHpBonus: 0,
     initiativeBonus: 0,
   });
-  const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+  const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus + progressionBonuses.maxHpBonus;
   const effectiveMaxHp = maxHitPoints + runEffectTotals.maxHpBonus;
   const currentHitPoints = Math.max(0, Math.min(runHitPoints[character.id] ?? effectiveMaxHp, effectiveMaxHp));
 
@@ -647,11 +648,11 @@ function toPlayerEncounterParticipant(
     id: `player-${slot}-${character.id}`,
     name: character.name,
     side: "player",
-    initiativeModifier: (derived.initiativeMod ?? 0) + runEffectTotals.initiativeBonus,
-    armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus + runEffectTotals.armorClassBonus,
+    initiativeModifier: (derived.initiativeMod ?? 0) + progressionBonuses.initiativeBonus + runEffectTotals.initiativeBonus,
+    armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus + progressionBonuses.armorClassBonus + runEffectTotals.armorClassBonus,
     hitPoints: currentHitPoints,
     maxHitPoints: effectiveMaxHp,
-    attackModifier: profile.attackModifier + equipmentEffect.attackBonus + runEffectTotals.attackBonus,
+    attackModifier: profile.attackModifier + equipmentEffect.attackBonus + progressionBonuses.attackBonus + runEffectTotals.attackBonus,
     damageDiceCount: profile.damageDiceCount,
     damageDieSides: profile.damageDieSides,
     damageModifier: profile.damageModifier,
@@ -1248,9 +1249,13 @@ export function formatRunPartyRosterEntry(
   const crawlerProgress = params?.character
     ? (() => {
       const progression = describeCrawlerProgression(params.character.crawler_xp);
+      const unlockedPerks = listUnlockedCrawlerPerks(params.character.crawler_xp);
+      const perkSummary = unlockedPerks.length > 0
+        ? ` - perks: ${unlockedPerks.map((perk) => perk.label).join(", ")}`
+        : "";
       return progression.nextTierXp === null
-        ? ` - crawler T${progression.tier} ${progression.totalXp} XP`
-        : ` - crawler T${progression.tier} ${progression.totalXp}/${progression.nextTierXp} XP`;
+        ? ` - crawler T${progression.tier} ${progression.totalXp} XP${perkSummary}`
+        : ` - crawler T${progression.tier} ${progression.totalXp}/${progression.nextTierXp} XP${perkSummary}`;
     })()
     : "";
 
@@ -1279,7 +1284,8 @@ async function buildRunPartyRoster(run: AdventureRunRecord, members: PartyMember
 
     const derived = character.derived_stats as { maxHp?: number };
     const equipmentEffect = extractEquipmentEffect(loadouts[index] ?? [], character.class_key);
-    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+    const progressionBonuses = sumCrawlerCombatBonuses(character.crawler_xp);
+    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus + progressionBonuses.maxHpBonus;
     const currentHitPoints = Math.max(0, Math.min(runHitPoints[character.id] ?? maxHitPoints, maxHitPoints));
 
     return formatRunPartyRosterEntry(member, index, {
@@ -1325,7 +1331,8 @@ async function applyRestHealing(run: AdventureRunRecord, members: PartyMemberDet
 
     const derived = character.derived_stats as { maxHp?: number };
     const equipmentEffect = extractEquipmentEffect(loadouts[index] ?? [], character.class_key);
-    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+    const progressionBonuses = sumCrawlerCombatBonuses(character.crawler_xp);
+    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus + progressionBonuses.maxHpBonus;
     const currentHitPoints = Math.max(0, Math.min(runHitPoints[character.id] ?? maxHitPoints, maxHitPoints));
     const healedHitPoints = applyHealing(currentHitPoints, maxHitPoints, amount);
 

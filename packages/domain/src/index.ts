@@ -26,7 +26,7 @@ import {
   type UserMatchSummaryRecord,
   type PublicCharacterStatusRecord,
 } from "@dm-bot/db";
-import { describeCrawlerProgression } from "@dm-bot/shared";
+import { describeCrawlerProgression, listUnlockedCrawlerPerks, nextCrawlerPerk } from "@dm-bot/shared";
 import {
   resolveMatch,
   type CombatEvent,
@@ -268,12 +268,15 @@ function rulesConfigSnapshot() {
 function formatCharacterSummary(character: CharacterRecord) {
   const derived = character.derived_stats as { maxHp?: number; armorClass?: number };
   const crawlerProgression = describeCrawlerProgression(character.crawler_xp);
+  const unlockedPerks = listUnlockedCrawlerPerks(character.crawler_xp);
+  const upcomingPerk = nextCrawlerPerk(character.crawler_xp);
   return [
     `Name: ${character.name}`,
     `Class: ${capitalize(character.class_key)}`,
     `Level: ${character.level}`,
-    `Crawler Tier: ${crawlerProgression.tier}`,
     `Crawler XP: ${crawlerProgression.totalXp}${crawlerProgression.nextTierXp === null ? " (max tier)" : ` / ${crawlerProgression.nextTierXp} (${crawlerProgression.xpToNextTier} to next tier)`}`,
+    `Crawler Perks: ${unlockedPerks.length > 0 ? unlockedPerks.map((perk) => `${perk.label} (${perk.summary.replace(" in crawler runs.", "").replace(".", "")})`).join(", ") : "None yet"}`,
+    `Next Unlock: ${upcomingPerk ? `${upcomingPerk.label} at ${upcomingPerk.unlockXp} XP` : "All crawler milestone perks unlocked"}`,
     `Status: ${capitalize(character.status)}`,
     `HP: ${derived.maxHp ?? "?"}`,
     `AC: ${derived.armorClass ?? "?"}`,

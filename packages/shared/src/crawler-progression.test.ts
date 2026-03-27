@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { describeCrawlerProgression } from "./crawler-progression.js";
+import {
+  describeCrawlerProgression,
+  listUnlockedCrawlerPerks,
+  nextCrawlerPerk,
+  sumCrawlerCombatBonuses,
+} from "./crawler-progression.js";
 
 test("crawler progression starts at tier one and points to the next threshold", () => {
   assert.deepEqual(
@@ -41,6 +46,27 @@ test("crawler progression caps next-threshold reporting at the highest configure
       nextTierXp: null,
       xpIntoTier: 299,
       xpToNextTier: null,
+    },
+  );
+});
+
+test("crawler perks unlock at milestone thresholds", () => {
+  assert.deepEqual(
+    listUnlockedCrawlerPerks(449).map((perk) => perk.label),
+    ["Veteran's Grit", "Deadeye"],
+  );
+  assert.equal(nextCrawlerPerk(449)?.label, "Guarded Stance");
+  assert.equal(nextCrawlerPerk(999), null);
+});
+
+test("crawler combat bonuses sum unlocked perk effects", () => {
+  assert.deepEqual(
+    sumCrawlerCombatBonuses(700),
+    {
+      maxHpBonus: 2,
+      attackBonus: 1,
+      armorClassBonus: 1,
+      initiativeBonus: 1,
     },
   );
 });

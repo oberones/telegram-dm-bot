@@ -289,7 +289,7 @@ test("run party roster entry includes crawler progression when character data is
         maxHitPoints: 12,
       },
     ),
-    "1. Alyndra (fighter) - @alice - ready - 7/12 HP - crawler T2 125/250 XP",
+    "1. Alyndra (fighter) - @alice - ready - 7/12 HP - crawler T2 125/250 XP - perks: Veteran's Grit",
   );
 });
 
