@@ -364,6 +364,7 @@ Recommended v1 rule:
 - award XP only for won encounters
 - award XP only to party members still standing at the end of that encounter
 - do not alter gold or loot payout rules when XP is granted
+- crawler XP maps to progression tiers at fixed thresholds for visibility and future unlock planning, but does not change combat stats yet
 
 Avoid full spellbook or feat complexity in crawler v1.
 

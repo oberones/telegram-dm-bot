@@ -300,6 +300,27 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1).replaceAll("_", " ");
 }
 
+function describeCrawlerProgression(totalXp: number) {
+  const thresholds = [0, 100, 250, 450, 700];
+  const normalizedXp = Math.max(0, Math.floor(totalXp));
+  let tierIndex = 0;
+
+  for (let index = 0; index < thresholds.length; index += 1) {
+    if (normalizedXp >= thresholds[index]!) {
+      tierIndex = index;
+    }
+  }
+
+  const nextTierXp = thresholds[tierIndex + 1] ?? null;
+
+  return {
+    tier: tierIndex + 1,
+    totalXp: normalizedXp,
+    nextTierXp,
+    xpToNextTier: nextTierXp === null ? null : Math.max(0, nextTierXp - normalizedXp),
+  };
+}
+
 function emptyAdminData(): AdminData {
   return {
     dashboard: null,
@@ -1193,7 +1214,12 @@ export function App() {
                         {capitalize(character.class_key)} Lv{character.level}
                       </td>
                       <td>
-                        {character.crawler_xp} XP
+                        {(() => {
+                          const progression = describeCrawlerProgression(character.crawler_xp);
+                          return progression.nextTierXp === null
+                            ? `T${progression.tier} • ${progression.totalXp} XP`
+                            : `T${progression.tier} • ${progression.totalXp}/${progression.nextTierXp} XP`;
+                        })()}
                       </td>
                       <td>{capitalize(character.status)}</td>
                       <td>
@@ -1244,7 +1270,10 @@ export function App() {
                 <div className="list-row">
                   <strong>Progression</strong>
                   <p>
-                    Arena Lv{characterLoadout.character.level} | Crawler XP {characterLoadout.character.crawler_xp}
+                    {(() => {
+                      const progression = describeCrawlerProgression(characterLoadout.character.crawler_xp);
+                      return `Arena Lv${characterLoadout.character.level} | Crawler T${progression.tier} | ${progression.nextTierXp === null ? `${progression.totalXp} XP (max tier)` : `${progression.totalXp}/${progression.nextTierXp} XP (${progression.xpToNextTier} to next tier)`}`;
+                    })()}
                   </p>
                 </div>
 

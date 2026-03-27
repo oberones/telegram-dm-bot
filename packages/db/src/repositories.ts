@@ -3434,12 +3434,19 @@ export async function incrementCharacterCrawlerXp(params: {
         UPDATE characters
         SET
           crawler_xp = crawler_xp + $2,
+          crawler_level = CASE
+            WHEN crawler_xp + $2 >= 700 THEN 5
+            WHEN crawler_xp + $2 >= 450 THEN 4
+            WHEN crawler_xp + $2 >= 250 THEN 3
+            WHEN crawler_xp + $2 >= 100 THEN 2
+            ELSE 1
+          END,
           crawler_stats = crawler_stats || $3::jsonb,
           updated_at = NOW()
         WHERE id = $1
         RETURNING id, crawler_level, crawler_xp, crawler_stats
       `,
-      [
+        [
         params.characterId,
         params.xpDelta,
         JSON.stringify(params.crawlerStatsPatch ?? {}),

@@ -26,6 +26,7 @@ import {
   type UserMatchSummaryRecord,
   type PublicCharacterStatusRecord,
 } from "@dm-bot/db";
+import { describeCrawlerProgression } from "@dm-bot/shared";
 import {
   resolveMatch,
   type CombatEvent,
@@ -266,11 +267,13 @@ function rulesConfigSnapshot() {
 
 function formatCharacterSummary(character: CharacterRecord) {
   const derived = character.derived_stats as { maxHp?: number; armorClass?: number };
+  const crawlerProgression = describeCrawlerProgression(character.crawler_xp);
   return [
     `Name: ${character.name}`,
     `Class: ${capitalize(character.class_key)}`,
     `Level: ${character.level}`,
-    `Crawler XP: ${character.crawler_xp}`,
+    `Crawler Tier: ${crawlerProgression.tier}`,
+    `Crawler XP: ${crawlerProgression.totalXp}${crawlerProgression.nextTierXp === null ? " (max tier)" : ` / ${crawlerProgression.nextTierXp} (${crawlerProgression.xpToNextTier} to next tier)`}`,
     `Status: ${capitalize(character.status)}`,
     `HP: ${derived.maxHp ?? "?"}`,
     `AC: ${derived.armorClass ?? "?"}`,

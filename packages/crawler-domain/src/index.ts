@@ -61,6 +61,7 @@ import {
   type RunRoomDetailRecord,
   type RunRewardRecord,
 } from "@dm-bot/db";
+import { describeCrawlerProgression } from "@dm-bot/shared";
 import {
   crawlerContentVersion,
   generateEncounterRewards,
@@ -775,7 +776,13 @@ function summarizeRewardRows(rewardRows: RunRewardRecord[]) {
 }
 
 function summarizeEncounterXpAwards(xpAwards: EncounterXpAward[]) {
-  return xpAwards.map((award) => `- ${award.characterName}: +${award.xpGranted} XP (${award.totalXp} total)`);
+  return xpAwards.map((award) => {
+    const progression = describeCrawlerProgression(award.totalXp);
+    const tail = progression.nextTierXp === null
+      ? `T${progression.tier}, max tier`
+      : `T${progression.tier}, ${progression.xpToNextTier} to next tier`;
+    return `- ${award.characterName}: +${award.xpGranted} XP (${award.totalXp} total, ${tail})`;
+  });
 }
 
 function formatEncounterVictoryMessage(
@@ -1239,7 +1246,12 @@ export function formatRunPartyRosterEntry(
     ? ` - ${params.currentHitPoints}/${params.maxHitPoints} HP`
     : "";
   const crawlerProgress = params?.character
-    ? ` - crawler ${params.character.crawler_xp} XP`
+    ? (() => {
+      const progression = describeCrawlerProgression(params.character.crawler_xp);
+      return progression.nextTierXp === null
+        ? ` - crawler T${progression.tier} ${progression.totalXp} XP`
+        : ` - crawler T${progression.tier} ${progression.totalXp}/${progression.nextTierXp} XP`;
+    })()
     : "";
 
   return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}${hitPointSummary}${crawlerProgress}`;
