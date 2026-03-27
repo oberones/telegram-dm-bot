@@ -153,6 +153,7 @@ Character death is not permanent.
 Recommended v1 rule:
 
 - if a character is defeated in a run, that character is removed from active participation for the rest of the run
+- defeated characters are marked immediately when they hit `0 HP`, so they stop counting for future combat actions and retreat votes
 - after the run ends, the character returns to persistent play in a recovered state
 
 ### Character Eligibility
@@ -537,6 +538,7 @@ Instead, use explicit Telegram-friendly recovery nodes.
 If a character is defeated:
 
 - they are out for the remainder of the run
+- they remain visible in run status views as defeated rather than disappearing from the roster
 
 ### Party Wipe
 

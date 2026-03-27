@@ -22,7 +22,7 @@ The current product supports:
 - Automated match resolution with persisted event logs
 - Record and history views for users
 - Soft deletion of characters by retiring them
-- A co-op crawler prototype with party formation, seeded runs, PvE encounters, room rewards, inventory, equipment, consumables, persistent loot, and encounter XP
+- A co-op crawler prototype with party formation, seeded runs, PvE encounters, run-based defeat, room rewards, inventory, equipment, consumables, persistent loot, and encounter XP
 - Read-only and operational admin views for users, characters, disputes, matches, recovery state, and audit logs
 - Admin moderation actions such as suspend/reactivate user and freeze/unfreeze character
 - Admin recovery actions such as cancel pending dispute, cancel/finalize flagged match, fail stuck crawler runs, and mark stuck crawler encounters errored
