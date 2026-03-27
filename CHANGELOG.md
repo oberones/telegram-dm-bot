@@ -1,3 +1,9 @@
+## 0.31.0 (2026-03-27)
+
+### Feat
+
+- add the ability for admins to cancel a run
+
 ## 0.30.0 (2026-03-27)
 
 ### Feat
