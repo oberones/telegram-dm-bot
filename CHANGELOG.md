@@ -1,3 +1,9 @@
+## 0.31.1 (2026-03-27)
+
+### Fix
+
+- update tcallback data size limit
+
 ## 0.31.0 (2026-03-27)
 
 ### Feat

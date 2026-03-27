@@ -1,6 +1,6 @@
 {
   "name": "@dm-bot/crawler-domain",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -18,8 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@dm-bot/crawler-generation": "0.31.0",
-    "@dm-bot/db": "0.31.0"
+    "@dm-bot/crawler-generation": "0.31.1",
+    "@dm-bot/db": "0.31.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
