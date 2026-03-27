@@ -1,3 +1,15 @@
+## 0.28.0 (2026-03-26)
+
+### Feat
+
+- add healing and rest economy
+
+### Fix
+
+- remove duplicate key error during combat
+- improve defeat handling
+- improve defeat handling
+
 ## 0.27.1 (2026-03-26)
 
 ### Fix
