@@ -9,6 +9,7 @@ import {
   canStartCrawlerParty,
   describeRunPresentationState,
   encounterXpForRoomType,
+  formatEncounterSideSummaryLine,
   formatRunPartyRosterEntry,
   isEligibleForCrawlerParty,
 } from "./index.js";
@@ -242,6 +243,29 @@ test("encounter xp only goes to surviving active party members", () => {
       characterName: "Alyndra",
       xpGranted: 25,
     }],
+  );
+});
+
+test("monster encounter roster lines surface player-facing role labels", () => {
+  assert.equal(
+    formatEncounterSideSummaryLine({
+      name: "Goblin Sneak",
+      side: "monster",
+      monsterRole: "skirmisher",
+      currentHitPoints: 7,
+      maxHitPoints: 7,
+    }),
+    "- Goblin Sneak (skirmisher) 7/7",
+  );
+
+  assert.equal(
+    formatEncounterSideSummaryLine({
+      name: "Alyndra",
+      side: "player",
+      currentHitPoints: 9,
+      maxHitPoints: 12,
+    }),
+    "- Alyndra 9/12",
   );
 });
 

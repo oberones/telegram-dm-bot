@@ -4,6 +4,7 @@ export type EncounterParticipant = {
   id: string;
   name: string;
   side: EncounterSide;
+  monsterRole?: "minion" | "brute" | "skirmisher" | "caster" | "support" | "elite" | "boss";
   initiativeModifier: number;
   armorClass: number;
   hitPoints: number;
@@ -222,7 +223,7 @@ export function resolveEncounterRound(
       continue;
     }
 
-    const target = chooseTarget(participants, actor.side, rng);
+    const target = chooseTarget(participants, actor, rng);
 
     if (!target) {
       return {
@@ -316,7 +317,7 @@ export function resolveRetreatAttempt(
   const livingMonsters = participants.filter((participant) => participant.side === "monster" && participant.currentHitPoints > 0);
 
   for (const monster of livingMonsters) {
-    const target = chooseTarget(participants, monster.side, rng);
+    const target = chooseTarget(participants, monster, rng);
 
     if (!target) {
       break;
@@ -411,15 +412,29 @@ function cloneStateParticipants(participants: EncounterStateParticipant[]): Muta
 
 function chooseTarget(
   participants: MutableEncounterParticipant[],
-  actingSide: EncounterSide,
+  actor: MutableEncounterParticipant,
   rng: RandomSource = defaultRandomSource,
 ): MutableEncounterParticipant | undefined {
   const availableTargets = participants.filter(
-    (participant) => participant.side !== actingSide && participant.currentHitPoints > 0,
+    (participant) => participant.side !== actor.side && participant.currentHitPoints > 0,
   );
 
   if (availableTargets.length === 0) {
     return undefined;
+  }
+
+  if (actor.side === "monster") {
+    const highestPriorityScore = Math.max(...availableTargets.map((participant) => monsterTargetPriorityScore(actor, participant)));
+    const highestPriorityTargets = availableTargets.filter(
+      (participant) => monsterTargetPriorityScore(actor, participant) === highestPriorityScore,
+    );
+
+    if (highestPriorityTargets.length === 1) {
+      return highestPriorityTargets[0];
+    }
+
+    const targetIndex = rng.rollDie(highestPriorityTargets.length) - 1;
+    return highestPriorityTargets[targetIndex];
   }
 
   const lowestHitPoints = Math.min(...availableTargets.map((participant) => participant.currentHitPoints));
@@ -431,6 +446,37 @@ function chooseTarget(
 
   const targetIndex = rng.rollDie(lowestHitPointTargets.length) - 1;
   return lowestHitPointTargets[targetIndex];
+}
+
+function monsterTargetPriorityScore(
+  actor: MutableEncounterParticipant,
+  target: MutableEncounterParticipant,
+): number {
+  const expectedActorDamage = actor.damageDiceCount * ((actor.damageDieSides + 1) / 2) + actor.damageModifier;
+  const targetThreat = target.attackModifier * 10
+    + target.damageModifier * 4
+    + target.damageDiceCount * (target.damageDieSides + 1)
+    + target.initiativeModifier;
+  const finishBonus = target.currentHitPoints <= expectedActorDamage ? 1000 : 0;
+  const woundedScore = Math.max(0, target.maxHitPoints - target.currentHitPoints);
+  const fragilityScore = Math.max(0, 20 - target.armorClass) * 6 + Math.max(0, 18 - target.maxHitPoints) * 4;
+
+  switch (actor.monsterRole) {
+    case "skirmisher":
+      return finishBonus + fragilityScore * 5 + targetThreat * 2 + woundedScore;
+    case "caster":
+      return finishBonus + fragilityScore * 4 + targetThreat * 3 + woundedScore;
+    case "support":
+      return finishBonus + fragilityScore * 3 + targetThreat * 2 + woundedScore * 2;
+    case "brute":
+      return finishBonus * 2 + woundedScore * 12 + Math.max(0, 30 - target.currentHitPoints) * 8 + targetThreat;
+    case "elite":
+    case "boss":
+      return finishBonus * 2 + targetThreat * 3 + fragilityScore * 2 + woundedScore * 4;
+    case "minion":
+    default:
+      return finishBonus + targetThreat - target.currentHitPoints;
+  }
 }
 
 function performAttack(

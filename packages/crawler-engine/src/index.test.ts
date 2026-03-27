@@ -224,26 +224,26 @@ test("monster target selection randomizes among equal-hp candidates", () => {
         name: "Rheen",
         side: "player",
         initiativeModifier: 1,
-        armorClass: 16,
+        armorClass: 14,
         hitPoints: 12,
         maxHitPoints: 12,
         attackModifier: 5,
         damageDiceCount: 1,
         damageDieSides: 8,
-        damageModifier: 3,
+        damageModifier: 2,
       },
       {
         id: "player-2",
-        name: "Ignus",
+        name: "Mira",
         side: "player",
-        initiativeModifier: 2,
-        armorClass: 12,
+        initiativeModifier: 1,
+        armorClass: 14,
         hitPoints: 12,
         maxHitPoints: 12,
         attackModifier: 5,
         damageDiceCount: 1,
-        damageDieSides: 10,
-        damageModifier: 0,
+        damageDieSides: 8,
+        damageModifier: 2,
       },
       {
         id: "monster-1",
@@ -257,6 +257,222 @@ test("monster target selection randomizes among equal-hp candidates", () => {
         damageDiceCount: 2,
         damageDieSides: 4,
         damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(initialized.state, rng);
+  const firstAttack = firstRound.events.find((event) => event.type === "attack");
+
+  assert.equal(firstAttack?.targetId, "player-2");
+});
+
+test("monster target selection prioritizes more dangerous players when no easy finish exists", () => {
+  const rng = createDeterministicRandomSource([5, 4, 20, 15, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Shieldbearer",
+        side: "player",
+        initiativeModifier: 0,
+        armorClass: 16,
+        hitPoints: 12,
+        maxHitPoints: 12,
+        attackModifier: 3,
+        damageDiceCount: 1,
+        damageDieSides: 4,
+        damageModifier: 0,
+      },
+      {
+        id: "player-2",
+        name: "Bladesinger",
+        side: "player",
+        initiativeModifier: 3,
+        armorClass: 13,
+        hitPoints: 12,
+        maxHitPoints: 12,
+        attackModifier: 7,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 4,
+      },
+      {
+        id: "monster-1",
+        name: "Warg",
+        side: "monster",
+        monsterRole: "minion",
+        initiativeModifier: 3,
+        armorClass: 13,
+        hitPoints: 11,
+        maxHitPoints: 11,
+        attackModifier: 5,
+        damageDiceCount: 2,
+        damageDieSides: 4,
+        damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(initialized.state, rng);
+  const firstAttack = firstRound.events.find((event) => event.type === "attack");
+
+  assert.equal(firstAttack?.targetId, "player-2");
+});
+
+test("skirmishers prefer fragile backliners over sturdier frontliners", () => {
+  const rng = createDeterministicRandomSource([5, 4, 20, 15, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Shieldbearer",
+        side: "player",
+        initiativeModifier: 0,
+        armorClass: 17,
+        hitPoints: 14,
+        maxHitPoints: 14,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+      },
+      {
+        id: "player-2",
+        name: "Glass Mage",
+        side: "player",
+        initiativeModifier: 2,
+        armorClass: 12,
+        hitPoints: 8,
+        maxHitPoints: 8,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 1,
+      },
+      {
+        id: "monster-1",
+        name: "Goblin Sneak",
+        side: "monster",
+        monsterRole: "skirmisher",
+        initiativeModifier: 3,
+        armorClass: 13,
+        hitPoints: 7,
+        maxHitPoints: 7,
+        attackModifier: 4,
+        damageDiceCount: 1,
+        damageDieSides: 6,
+        damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(initialized.state, rng);
+  const firstAttack = firstRound.events.find((event) => event.type === "attack");
+
+  assert.equal(firstAttack?.targetId, "player-2");
+});
+
+test("brutes prioritize finish opportunities over healthier targets", () => {
+  const rng = createDeterministicRandomSource([5, 4, 20, 15, 4, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Rogue",
+        side: "player",
+        initiativeModifier: 2,
+        armorClass: 14,
+        hitPoints: 4,
+        maxHitPoints: 12,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+      },
+      {
+        id: "player-2",
+        name: "Wizard",
+        side: "player",
+        initiativeModifier: 2,
+        armorClass: 12,
+        hitPoints: 12,
+        maxHitPoints: 12,
+        attackModifier: 6,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 2,
+      },
+      {
+        id: "monster-1",
+        name: "Warg",
+        side: "monster",
+        monsterRole: "brute",
+        initiativeModifier: 3,
+        armorClass: 13,
+        hitPoints: 11,
+        maxHitPoints: 11,
+        attackModifier: 5,
+        damageDiceCount: 2,
+        damageDieSides: 4,
+        damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(initialized.state, rng);
+  const firstAttack = firstRound.events.find((event) => event.type === "attack");
+
+  assert.equal(firstAttack?.targetId, "player-1");
+});
+
+test("casters prefer exposed high-threat targets", () => {
+  const rng = createDeterministicRandomSource([5, 4, 20, 15, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Guardian",
+        side: "player",
+        initiativeModifier: 0,
+        armorClass: 17,
+        hitPoints: 14,
+        maxHitPoints: 14,
+        attackModifier: 4,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 2,
+      },
+      {
+        id: "player-2",
+        name: "Stormcaller",
+        side: "player",
+        initiativeModifier: 3,
+        armorClass: 12,
+        hitPoints: 9,
+        maxHitPoints: 9,
+        attackModifier: 7,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 3,
+      },
+      {
+        id: "monster-1",
+        name: "Arc Spark",
+        side: "monster",
+        monsterRole: "caster",
+        initiativeModifier: 4,
+        armorClass: 12,
+        hitPoints: 8,
+        maxHitPoints: 8,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 1,
       },
     ],
     rng,

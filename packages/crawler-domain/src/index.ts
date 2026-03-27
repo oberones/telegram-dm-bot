@@ -667,6 +667,7 @@ function toMonsterEncounterParticipant(
     id: `monster-${slot}-${template.key}`,
     name: template.name,
     side: "monster",
+    monsterRole: template.role,
     initiativeModifier: template.initiativeModifier,
     armorClass: template.armorClass,
     hitPoints: template.hitPoints,
@@ -682,25 +683,41 @@ function formatEncounterLog(events: EncounterEvent[]) {
   return events.map((event) => `- ${event.summary}`);
 }
 
+type EncounterSideSummaryParticipant = {
+  name: string;
+  side: "player" | "monster";
+  currentHitPoints: number;
+  maxHitPoints: number;
+  monsterRole?: "minion" | "brute" | "skirmisher" | "caster" | "support" | "elite" | "boss";
+};
+
+export function formatEncounterSideSummaryLine(participant: EncounterSideSummaryParticipant) {
+  const roleSummary = participant.side === "monster" && participant.monsterRole
+    ? ` (${participant.monsterRole.replaceAll("_", " ")})`
+    : "";
+
+  return `- ${participant.name}${roleSummary} ${participant.currentHitPoints}/${participant.maxHitPoints}`;
+}
+
 function summarizeEncounterSide(
-  participants: Array<{ name: string; side: "player" | "monster"; currentHitPoints: number; maxHitPoints: number }>,
+  participants: EncounterSideSummaryParticipant[],
   side: "player" | "monster",
 ) {
   return participants
     .filter((participant) => participant.side === side)
-    .map((participant) => `- ${participant.name} ${participant.currentHitPoints}/${participant.maxHitPoints}`);
+    .map((participant) => formatEncounterSideSummaryLine(participant));
 }
 
 function roomResolutionLead(roomType: RunRoomDetailRecord["room_type"]) {
   switch (roomType) {
     case "treasure":
-      return "The party cracks open a hidden cache and banks the spoils.";
+      return "The party pries open a hidden cache and pockets the spoils before the dust settles.";
     case "event":
-      return "The party weathers the chamber's strange event and comes away with something to show for it.";
+      return "The party rides out the chamber's strange event and comes away a little wiser, and a little more wary.";
     case "rest":
-      return "The party gathers themselves in a rare calm and secures a few useful supplies.";
+      return "The party gathers themselves in the hush of the room and secures a few useful supplies.";
     default:
-      return "The room has been resolved.";
+      return "The room has been cleared, and the dungeon's tension eases by a single breath.";
   }
 }
 
@@ -818,6 +835,7 @@ function formatEncounterVictoryMessage(
   }
 
   lines.push("");
+  lines.push("The room falls quiet, and the party takes a hard-earned moment to breathe.");
   lines.push("Combat Log");
   lines.push(...formatEncounterLog(result.events));
 
@@ -826,7 +844,7 @@ function formatEncounterVictoryMessage(
     lines.push("");
     lines.push("Next Room");
     lines.push(prompt.title ?? `Floor ${next.floor_number}, Room ${next.room_number}`);
-    lines.push(prompt.description ?? "A new chamber lies ahead.");
+    lines.push(prompt.description ?? "A new chamber waits beyond the threshold, half-shadow and promise.");
     lines.push(`Room type: ${(prompt.roomType ?? next.room_type).replaceAll("_", " ")}`);
 
     return {
@@ -888,7 +906,7 @@ function formatRoomRewardMessage(
     lines.push("");
     lines.push("Next Room");
     lines.push(prompt.title ?? `Floor ${next.floor_number}, Room ${next.room_number}`);
-    lines.push(prompt.description ?? "A new chamber lies ahead.");
+    lines.push(prompt.description ?? "A new chamber waits beyond the threshold, half-shadow and promise.");
     lines.push(`Room type: ${(prompt.roomType ?? next.room_type).replaceAll("_", " ")}`);
 
     return {
@@ -929,6 +947,8 @@ function formatEncounterDefeatMessage(
       `Rounds: ${result.roundsCompleted}`,
       `Final status: ${finalSummary}`,
       "",
+      "The monsters press the advantage and the chamber turns savage.",
+      "",
       "Combat Log",
       ...formatEncounterLog(result.events),
       "",
@@ -963,7 +983,7 @@ function formatEncounterActionPrompt(params: {
       "Enemies",
       ...(monsterLines.length > 0 ? monsterLines : ["- No surviving enemies."]),
       "",
-      "Choose whether to press the attack or attempt a full-party retreat.",
+      "Choose whether to press the attack or try to break away as a full party.",
     ].join("\n"),
     replyMarkup: {
       inline_keyboard: [
@@ -988,6 +1008,7 @@ function formatEncounterRoundMessage(params: {
     "",
     ...formatEncounterLog(params.events),
     "",
+    "The fight hangs in the air for a breath before the next choice arrives.",
     ...formatEncounterActionPrompt(params).text.split("\n"),
   ];
 
@@ -1046,6 +1067,7 @@ function formatRetreatSuccessMessage(params: {
       "",
       ...formatEncounterLog(params.events),
       "",
+      "The line breaks, boots skid, and the party pulls back from the edge.",
       ...(params.fallbackRoom
         ? [
           `The party falls back to Floor ${params.fallbackRoom.floor_number}, Room ${params.fallbackRoom.room_number}.`,
@@ -1099,7 +1121,7 @@ function formatActiveRoomPrompt(
     presentation.actionLine,
     "",
     prompt.title ?? `Floor ${room.floor_number}, Room ${room.room_number}`,
-    prompt.description ?? "A new chamber lies ahead.",
+    prompt.description ?? "A new chamber waits beyond the threshold, half-shadow and promise.",
     `Room type: ${(prompt.roomType ?? room.room_type).replaceAll("_", " ")}`,
   ];
   const activeEffects = getActiveRunEffects(run);
@@ -1134,7 +1156,7 @@ function formatRunCompleteMessage(run: AdventureRunRecord, room: RunRoomDetailRe
       `Theme: ${run.theme_key ?? "unknown"}`,
       `Party size: ${memberCount}`,
       "",
-      `The party cleared Floor ${room.floor_number}, Room ${room.room_number} and emerged from the dungeon.`,
+      `The party cleared Floor ${room.floor_number}, Room ${room.room_number} and emerged from the dungeon with the dust still settling behind them.`,
       "The run is complete and any banked rewards remain in your inventory.",
     ].join("\n"),
   } satisfies CrawlerOutboundMessage;
@@ -1149,7 +1171,7 @@ function formatRunFailedMessage(run: AdventureRunRecord, room: RunRoomDetailReco
       `Theme: ${run.theme_key ?? "unknown"}`,
       `Party size: ${memberCount}`,
       "",
-      `The party fell in Floor ${room.floor_number}, Room ${room.room_number}.`,
+      `The party fell in Floor ${room.floor_number}, Room ${room.room_number}, where the dungeon finally pushed back hard enough to end the expedition.`,
       run.failure_reason ?? "The expedition has ended in defeat.",
     ].join("\n"),
   } satisfies CrawlerOutboundMessage;

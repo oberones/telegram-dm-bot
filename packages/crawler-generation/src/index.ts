@@ -296,12 +296,12 @@ function buildPromptPayload(
   templateKey: string,
 ) {
   const descriptionByType: Record<CrawlerRoomType, string> = {
-    combat: "A hostile presence stirs ahead.",
-    elite_combat: "A stronger foe guards the path forward.",
-    treasure: "A cache of supplies or treasure glints in the dark.",
-    event: "Something strange waits to be investigated.",
-    rest: "A rare calm settles over this chamber.",
-    boss: "A final threat bars the way.",
+    combat: "Something hostile stirs in the dark, waiting for the first careless step.",
+    elite_combat: "A dangerous sentinel holds the way, and the chamber itself feels reluctant to yield.",
+    treasure: "Dust and old stone part around a faint glimmer of supplies, coin, or forgotten craft.",
+    event: "An odd hush clings to the room, like the dungeon is daring the party to investigate.",
+    rest: "The chamber finally exhales, offering a rare pocket of quiet and breathing room.",
+    boss: "The path narrows into a final test of nerve, steel, and stubborn will.",
   };
 
   return {
