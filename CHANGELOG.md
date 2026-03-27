@@ -1,3 +1,14 @@
+## 0.29.0 (2026-03-26)
+
+### Feat
+
+- add level progression
+- add support for XP progression with tiers
+
+### Fix
+
+- make initial player targeting random
+
 ## 0.28.0 (2026-03-26)
 
 ### Feat
