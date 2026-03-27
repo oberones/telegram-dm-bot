@@ -2366,9 +2366,9 @@ export async function setPartyMemberStatus(params: {
       `
         UPDATE party_members
         SET
-          status = $2,
-          ready_at = CASE WHEN $2 = 'ready' THEN NOW() ELSE NULL END,
-          left_at = CASE WHEN $2 = 'left' THEN NOW() ELSE NULL END,
+          status = $2::party_member_status,
+          ready_at = CASE WHEN $2::party_member_status = 'ready'::party_member_status THEN NOW() ELSE NULL END,
+          left_at = CASE WHEN $2::party_member_status = 'left'::party_member_status THEN NOW() ELSE NULL END,
           updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -2885,6 +2885,72 @@ export async function createEncounterEvent(params: {
     );
 
     return result.rows[0]!;
+  });
+}
+
+export async function appendEncounterEvents(params: {
+  encounterId: string;
+  events: Array<{
+    roundNumber: number;
+    eventType: string;
+    actorParticipantId?: string | null;
+    targetParticipantId?: string | null;
+    publicText?: string | null;
+    payload: Record<string, unknown>;
+  }>;
+}): Promise<number> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `
+        SELECT id
+        FROM encounters
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [params.encounterId],
+    );
+
+    const sequenceResult = await client.query<{ next_sequence_number: number }>(
+      `
+        SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_sequence_number
+        FROM encounter_events
+        WHERE encounter_id = $1
+      `,
+      [params.encounterId],
+    );
+
+    const nextSequenceNumber = sequenceResult.rows[0]?.next_sequence_number ?? 1;
+
+    for (const [index, event] of params.events.entries()) {
+      await client.query<EncounterEventRecord>(
+        `
+          INSERT INTO encounter_events (
+            encounter_id,
+            sequence_number,
+            round_number,
+            event_type,
+            actor_participant_id,
+            target_participant_id,
+            public_text,
+            payload
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING *
+        `,
+        [
+          params.encounterId,
+          nextSequenceNumber + index,
+          event.roundNumber,
+          event.eventType,
+          event.actorParticipantId ?? null,
+          event.targetParticipantId ?? null,
+          event.publicText ?? null,
+          event.payload,
+        ],
+      );
+    }
+
+    return nextSequenceNumber + params.events.length;
   });
 }
 

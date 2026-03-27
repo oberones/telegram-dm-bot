@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   addPartyMember,
+  appendEncounterEvents as appendEncounterEventsInDb,
   createAdventureRun,
   createAuditLog,
   createEncounter,
@@ -1990,25 +1991,20 @@ async function grantRoomRewards(
 
 async function appendEncounterEvents(
   encounterId: string,
-  snapshot: PersistedEncounterState,
+  _snapshot: PersistedEncounterState,
   events: EncounterEvent[],
 ) {
-  const nextSequenceNumber = snapshot.nextSequenceNumber ?? 1;
-
-  for (const [index, event] of events.entries()) {
-    await createEncounterEvent({
-      encounterId,
-      sequenceNumber: nextSequenceNumber + index,
+  return appendEncounterEventsInDb({
+    encounterId,
+    events: events.map((event) => ({
       roundNumber: "round" in event ? event.round : 0,
       eventType: event.type,
       actorParticipantId: null,
       targetParticipantId: null,
       publicText: event.summary,
       payload: event as unknown as Record<string, unknown>,
-    });
-  }
-
-  return nextSequenceNumber + events.length;
+    })),
+  });
 }
 
 async function resolveEncounterRoom(
