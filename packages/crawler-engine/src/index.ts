@@ -222,7 +222,7 @@ export function resolveEncounterRound(
       continue;
     }
 
-    const target = chooseTarget(participants, actor.side);
+    const target = chooseTarget(participants, actor.side, rng);
 
     if (!target) {
       return {
@@ -316,7 +316,7 @@ export function resolveRetreatAttempt(
   const livingMonsters = participants.filter((participant) => participant.side === "monster" && participant.currentHitPoints > 0);
 
   for (const monster of livingMonsters) {
-    const target = chooseTarget(participants, monster.side);
+    const target = chooseTarget(participants, monster.side, rng);
 
     if (!target) {
       break;
@@ -412,16 +412,25 @@ function cloneStateParticipants(participants: EncounterStateParticipant[]): Muta
 function chooseTarget(
   participants: MutableEncounterParticipant[],
   actingSide: EncounterSide,
+  rng: RandomSource = defaultRandomSource,
 ): MutableEncounterParticipant | undefined {
-  return participants
-    .filter((participant) => participant.side !== actingSide && participant.currentHitPoints > 0)
-    .sort((left, right) => {
-      if (left.currentHitPoints !== right.currentHitPoints) {
-        return left.currentHitPoints - right.currentHitPoints;
-      }
+  const availableTargets = participants.filter(
+    (participant) => participant.side !== actingSide && participant.currentHitPoints > 0,
+  );
 
-      return left.name.localeCompare(right.name);
-    })[0];
+  if (availableTargets.length === 0) {
+    return undefined;
+  }
+
+  const lowestHitPoints = Math.min(...availableTargets.map((participant) => participant.currentHitPoints));
+  const lowestHitPointTargets = availableTargets.filter((participant) => participant.currentHitPoints === lowestHitPoints);
+
+  if (lowestHitPointTargets.length === 1) {
+    return lowestHitPointTargets[0];
+  }
+
+  const targetIndex = rng.rollDie(lowestHitPointTargets.length) - 1;
+  return lowestHitPointTargets[targetIndex];
 }
 
 function performAttack(

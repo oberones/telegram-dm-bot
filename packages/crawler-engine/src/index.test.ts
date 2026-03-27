@@ -215,6 +215,59 @@ test("encounters can resolve one round at a time from persisted state", () => {
   assert.ok(firstRound.events.some((event) => event.type === "encounter_end"));
 });
 
+test("monster target selection randomizes among equal-hp candidates", () => {
+  const rng = createDeterministicRandomSource([5, 4, 20, 2, 15, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Rheen",
+        side: "player",
+        initiativeModifier: 1,
+        armorClass: 16,
+        hitPoints: 12,
+        maxHitPoints: 12,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+      },
+      {
+        id: "player-2",
+        name: "Ignus",
+        side: "player",
+        initiativeModifier: 2,
+        armorClass: 12,
+        hitPoints: 12,
+        maxHitPoints: 12,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 0,
+      },
+      {
+        id: "monster-1",
+        name: "Warg",
+        side: "monster",
+        initiativeModifier: 3,
+        armorClass: 13,
+        hitPoints: 11,
+        maxHitPoints: 11,
+        attackModifier: 5,
+        damageDiceCount: 2,
+        damageDieSides: 4,
+        damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(initialized.state, rng);
+  const firstAttack = firstRound.events.find((event) => event.type === "attack");
+
+  assert.equal(firstAttack?.targetId, "player-2");
+});
+
 test("retreat attempts trigger opportunity attacks before the party escapes", () => {
   const initialized = initializeEncounterState({
     participants: [
