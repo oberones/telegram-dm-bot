@@ -1245,7 +1245,7 @@ export function formatRunPartyRosterEntry(
 }
 
 async function buildRunPartyRoster(members: PartyMemberDetailRecord[]) {
-  const currentMembers = activeMembers(members);
+  const currentMembers = members.filter((member) => member.status !== "left" && member.status !== "disconnected");
 
   if (currentMembers.length === 0) {
     return ["No active party members found."];
@@ -1253,6 +1253,46 @@ async function buildRunPartyRoster(members: PartyMemberDetailRecord[]) {
 
   const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
   return currentMembers.map((member, index) => formatRunPartyRosterEntry(member, index, characters[index] ?? null));
+}
+
+export function applyEncounterDefeatToPartyMembers(
+  members: PartyMemberDetailRecord[],
+  finalParticipants: EncounterResolutionResult["finalParticipants"],
+) {
+  return members.map((member) => {
+    if (!ACTIVE_PARTY_MEMBER_STATUSES.has(member.status)) {
+      return member;
+    }
+
+    const participant = finalParticipants.find((candidate) => candidate.id.endsWith(member.character_id));
+
+    if (!participant || participant.currentHitPoints > 0) {
+      return member;
+    }
+
+    return {
+      ...member,
+      status: "defeated" as const,
+    };
+  });
+}
+
+async function syncEncounterDefeatStates(
+  members: PartyMemberDetailRecord[],
+  finalParticipants: EncounterResolutionResult["finalParticipants"],
+) {
+  const nextMembers = applyEncounterDefeatToPartyMembers(members, finalParticipants);
+
+  for (const [index, member] of members.entries()) {
+    if (member.status !== "defeated" && nextMembers[index]?.status === "defeated") {
+      await setPartyMemberStatus({
+        partyMemberId: member.id,
+        status: "defeated",
+      });
+    }
+  }
+
+  return nextMembers;
 }
 
 function formatInventoryMessage(
@@ -2888,10 +2928,11 @@ export async function handleCrawlerCallback(
     const members = await listPartyMemberDetails(party.id);
     const rooms = await listRunRoomDetails(run.id);
     const next = nextRoom(rooms, room.id);
-    const memberCount = activeMembers(members).length;
     const roundResult = resolveEncounterRound(state);
     const nextSequenceNumber = await appendEncounterEvents(encounter.id, snapshot ?? {}, roundResult.events);
     const partyHitPoints = updateRunHitPoints(run, roundResult.finalParticipants, members);
+    const nextMembers = await syncEncounterDefeatStates(members, roundResult.finalParticipants);
+    const memberCount = activeMembers(nextMembers).length;
 
     if (roundResult.winningSide === "monster") {
       await updateEncounter({
@@ -2960,7 +3001,7 @@ export async function handleCrawlerCallback(
         run,
         room,
         encounterId: encounter.id,
-        members,
+        members: nextMembers,
         result: {
           winningSide: "player",
           roundsCompleted: roundResult.roundsCompleted,
@@ -3067,7 +3108,7 @@ export async function handleCrawlerCallback(
         encounterId: encounter.id,
         state: roundResult.state,
         retreatVotes: [],
-        members,
+        members: nextMembers,
         events: roundResult.events,
       }),
     };
@@ -3165,6 +3206,7 @@ export async function handleCrawlerCallback(
     const retreatResult = resolveRetreatAttempt(state);
     const nextSequenceNumber = await appendEncounterEvents(encounter.id, snapshot ?? {}, retreatResult.events);
     const partyHitPoints = updateRunHitPoints(run, retreatResult.finalParticipants, members);
+    await syncEncounterDefeatStates(members, retreatResult.finalParticipants);
     const rooms = await listRunRoomDetails(run.id);
     const fallbackRoom = snapshot?.fallbackRoomId
       ? await getRunRoomDetailById(snapshot.fallbackRoomId)
