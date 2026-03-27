@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyHealing,
   applyEncounterDefeatToPartyMembers,
   buildEncounterXpRecipients,
   buildPartyLobbyButtonLabels,
@@ -265,26 +266,30 @@ test("run party roster entry includes crawler progression when character data is
       },
       0,
       {
-        id: "char-1",
-        user_id: "user-1",
-        name: "Alyndra",
-        class_key: "fighter",
-        level: 1,
-        crawler_level: 2,
-        crawler_xp: 125,
-        status: "active",
-        rules_version_id: "rules-1",
-        wins: 0,
-        losses: 0,
-        matches_played: 0,
-        derived_stats: {},
-        ability_scores: {},
-        loadout: {},
-        resource_state: {},
-        crawler_stats: {},
+        character: {
+          id: "char-1",
+          user_id: "user-1",
+          name: "Alyndra",
+          class_key: "fighter",
+          level: 1,
+          crawler_level: 2,
+          crawler_xp: 125,
+          status: "active",
+          rules_version_id: "rules-1",
+          wins: 0,
+          losses: 0,
+          matches_played: 0,
+          derived_stats: {},
+          ability_scores: {},
+          loadout: {},
+          resource_state: {},
+          crawler_stats: {},
+        },
+        currentHitPoints: 7,
+        maxHitPoints: 12,
       },
     ),
-    "1. Alyndra (fighter) - @alice - ready - crawler 125 XP",
+    "1. Alyndra (fighter) - @alice - ready - 7/12 HP - crawler 125 XP",
   );
 });
 
@@ -348,4 +353,10 @@ test("defeated encounter participants are removed from active run participation"
     ).map((member) => member.status),
     ["defeated", "ready"],
   );
+});
+
+test("healing is capped at max hp", () => {
+  assert.equal(applyHealing(4, 10, 4), 8);
+  assert.equal(applyHealing(9, 10, 4), 10);
+  assert.equal(applyHealing(0, 10, 6), 6);
 });

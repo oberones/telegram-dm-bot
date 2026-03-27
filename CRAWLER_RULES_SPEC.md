@@ -497,6 +497,11 @@ Equipment modifies persistent character stats outside runs and is then snapshott
 
 Consumables are spent permanently when used.
 
+Recommended v1 implementation:
+
+- `minor_healing_potion` restores current HP immediately during a run
+- other supported consumables grant bounded combat boons rather than full spell-like complexity
+
 ### Telegram Constraint
 
 Consumables must be offered through compact menus.
@@ -512,10 +517,9 @@ Rest is room-based, not freeform.
 
 ### Recommended v1 Rest Rule
 
-At rest rooms, the party may receive a bounded recovery effect such as:
+At rest rooms, the party gets a bounded recovery package:
 
-- partial HP recovery
-- limited resource refresh
+- partial HP recovery for active, non-defeated party members
 - one consumable grant
 
 ### Strong Recommendation

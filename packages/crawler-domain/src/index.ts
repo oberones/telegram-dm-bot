@@ -511,15 +511,6 @@ function chooseRoomEffect(
     hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   }
 
-  if (room.room_type === "rest") {
-    return {
-      key: "fortified_rest",
-      label: "Fortified Rest",
-      summary: "+2 max HP in the next encounter.",
-      maxHpBonus: 2,
-    };
-  }
-
   if (room.room_type === "event") {
     return hash % 2 === 0
       ? {
@@ -542,12 +533,7 @@ function chooseRoomEffect(
 function consumableEffectForTemplateKey(templateKey: string): RunEffectRecord | null {
   switch (templateKey) {
     case "minor_healing_potion":
-      return {
-        key: "minor_healing_potion",
-        label: "Mending Draught",
-        summary: "+3 max HP in the next encounter.",
-        maxHpBonus: 3,
-      };
+      return null;
     case "flash_powder":
       return {
         key: "flash_powder",
@@ -858,6 +844,7 @@ function formatRoomRewardMessage(
   room: RunRoomDetailRecord,
   rewards: GrantedRewardSummary,
   gainedEffect: RunEffectRecord | null,
+  recoveryLines: string[],
   next: RunRoomDetailRecord | null,
   memberCount: number,
 ) {
@@ -880,6 +867,12 @@ function formatRoomRewardMessage(
     lines.push("");
     lines.push("Boon");
     lines.push(`- ${gainedEffect.label}: ${gainedEffect.summary}`);
+  }
+
+  if (recoveryLines.length > 0) {
+    lines.push("");
+    lines.push("Recovery");
+    lines.push(...recoveryLines);
   }
 
   if (next && prompt) {
@@ -1234,25 +1227,106 @@ export function buildPartyLobbyButtonLabels(params: {
 export function formatRunPartyRosterEntry(
   member: PartyMemberDetailRecord,
   index: number,
-  character: CharacterRecord | null,
+  params?: {
+    character?: CharacterRecord | null;
+    currentHitPoints?: number | null;
+    maxHitPoints?: number | null;
+  },
 ) {
   const handle = member.telegram_username ? `@${member.telegram_username}` : member.user_display_name;
-  const crawlerProgress = character
-    ? ` - crawler ${character.crawler_xp} XP`
+  const hitPointSummary = typeof params?.currentHitPoints === "number" && typeof params?.maxHitPoints === "number"
+    ? ` - ${params.currentHitPoints}/${params.maxHitPoints} HP`
+    : "";
+  const crawlerProgress = params?.character
+    ? ` - crawler ${params.character.crawler_xp} XP`
     : "";
 
-  return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}${crawlerProgress}`;
+  return `${index + 1}. ${member.character_name} (${member.class_key}) - ${handle} - ${member.status}${hitPointSummary}${crawlerProgress}`;
 }
 
-async function buildRunPartyRoster(members: PartyMemberDetailRecord[]) {
+async function buildRunPartyRoster(run: AdventureRunRecord, members: PartyMemberDetailRecord[]) {
   const currentMembers = members.filter((member) => member.status !== "left" && member.status !== "disconnected");
 
   if (currentMembers.length === 0) {
     return ["No active party members found."];
   }
 
-  const characters = await Promise.all(currentMembers.map((member) => getCharacterById(member.character_id)));
-  return currentMembers.map((member, index) => formatRunPartyRosterEntry(member, index, characters[index] ?? null));
+  const runHitPoints = getRunHitPoints(run);
+  const [characters, loadouts] = await Promise.all([
+    Promise.all(currentMembers.map((member) => getCharacterById(member.character_id))),
+    Promise.all(currentMembers.map((member) => listEquipmentLoadoutsForCharacter(member.character_id))),
+  ]);
+
+  return currentMembers.map((member, index) => {
+    const character = characters[index] ?? null;
+
+    if (!character) {
+      return formatRunPartyRosterEntry(member, index);
+    }
+
+    const derived = character.derived_stats as { maxHp?: number };
+    const equipmentEffect = extractEquipmentEffect(loadouts[index] ?? [], character.class_key);
+    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+    const currentHitPoints = Math.max(0, Math.min(runHitPoints[character.id] ?? maxHitPoints, maxHitPoints));
+
+    return formatRunPartyRosterEntry(member, index, {
+      character,
+      currentHitPoints,
+      maxHitPoints,
+    });
+  });
+}
+
+export function applyHealing(currentHitPoints: number, maxHitPoints: number, amount: number) {
+  return Math.max(0, Math.min(currentHitPoints + amount, maxHitPoints));
+}
+
+type RunHealingSummary = {
+  partyHitPoints: RunCombatHitPointRecord;
+  summaryLines: string[];
+};
+
+async function applyRestHealing(run: AdventureRunRecord, members: PartyMemberDetailRecord[], amount: number): Promise<RunHealingSummary> {
+  const currentMembers = activeMembers(members);
+  const runHitPoints = { ...getRunHitPoints(run) };
+
+  if (currentMembers.length === 0) {
+    return {
+      partyHitPoints: runHitPoints,
+      summaryLines: [],
+    };
+  }
+
+  const [characters, loadouts] = await Promise.all([
+    Promise.all(currentMembers.map((member) => getCharacterById(member.character_id))),
+    Promise.all(currentMembers.map((member) => listEquipmentLoadoutsForCharacter(member.character_id))),
+  ]);
+  const summaryLines: string[] = [];
+
+  for (const [index, member] of currentMembers.entries()) {
+    const character = characters[index];
+
+    if (!character) {
+      continue;
+    }
+
+    const derived = character.derived_stats as { maxHp?: number };
+    const equipmentEffect = extractEquipmentEffect(loadouts[index] ?? [], character.class_key);
+    const maxHitPoints = (derived.maxHp ?? 1) + equipmentEffect.maxHpBonus;
+    const currentHitPoints = Math.max(0, Math.min(runHitPoints[character.id] ?? maxHitPoints, maxHitPoints));
+    const healedHitPoints = applyHealing(currentHitPoints, maxHitPoints, amount);
+
+    runHitPoints[character.id] = healedHitPoints;
+
+    if (healedHitPoints > currentHitPoints) {
+      summaryLines.push(`- ${character.name}: ${currentHitPoints}/${maxHitPoints} -> ${healedHitPoints}/${maxHitPoints} HP`);
+    }
+  }
+
+  return {
+    partyHitPoints: runHitPoints,
+    summaryLines,
+  };
 }
 
 export function applyEncounterDefeatToPartyMembers(
@@ -1430,7 +1504,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
   ]);
   const currentRoom = rooms.find((room) => room.id === run.current_room_id) ?? rooms[0];
   const memberCount = activeMembers(members).length;
-  const partyRosterLines = await buildRunPartyRoster(members);
+  const partyRosterLines = await buildRunPartyRoster(run, members);
 
   if (!currentRoom) {
     return {
@@ -2277,15 +2351,51 @@ export async function handleCrawlerCallback(
       };
     }
 
-    const effect = consumableEffectForTemplateKey(template.template_key);
+    const partyMembers = await listPartyMemberDetails(activeParty.id);
+    const partyMember = partyMembers.find((member) => member.user_id === user.id && member.character_id === character.id) ?? null;
 
-    if (!effect) {
+    if (!partyMember || !ACTIVE_PARTY_MEMBER_STATUSES.has(partyMember.status)) {
+      return {
+        alertText: "This character cannot use crawler consumables in the current run",
+      };
+    }
+
+    const isHealingPotion = template.template_key === "minor_healing_potion";
+    const effect = consumableEffectForTemplateKey(template.template_key);
+    let nextSummary = run.summary;
+    let auditMetadata: Record<string, unknown> = {
+      runId: run.id,
+      characterId: character.id,
+      templateKey: template.template_key,
+    };
+
+    if (isHealingPotion) {
+      const healing = await applyRestHealing(run, [partyMember], 6);
+
+      if (healing.summaryLines.length === 0) {
+        return {
+          alertText: "That character is already at full health",
+        };
+      }
+
+      nextSummary = buildRunSummary(run, {
+        partyHitPoints: healing.partyHitPoints,
+      });
+      auditMetadata = {
+        ...auditMetadata,
+        healing: healing.summaryLines,
+      };
+    } else if (effect) {
+      nextSummary = buildRunSummary(run, {}, [...getActiveRunEffects(run), effect]);
+      auditMetadata = {
+        ...auditMetadata,
+        effect,
+      };
+    } else {
       return {
         alertText: "That consumable is not supported yet",
       };
     }
-
-    const nextEffects = [...getActiveRunEffects(run), effect];
 
     await updateInventoryItemStatus({
       inventoryItemId: inventoryItem.id,
@@ -2293,7 +2403,7 @@ export async function handleCrawlerCallback(
     });
     await updateAdventureRun({
       runId: run.id,
-      summary: buildRunSummary(run, {}, nextEffects),
+      summary: nextSummary,
     });
     await createAuditLog({
       actorType: "user",
@@ -2301,16 +2411,11 @@ export async function handleCrawlerCallback(
       action: "crawler_consumable_used",
       targetType: "inventory_item",
       targetId: inventoryItem.id,
-      metadata: {
-        runId: run.id,
-        characterId: character.id,
-        templateKey: template.template_key,
-        effect,
-      },
+      metadata: auditMetadata,
     });
 
     return {
-      alertText: `${template.display_name} used`,
+      alertText: isHealingPotion ? `${template.display_name} restored health` : `${template.display_name} used`,
       message: await handleInventoryCommand(actor),
     };
   }
@@ -2823,6 +2928,12 @@ export async function handleCrawlerCallback(
 
     const rewards = await grantRoomRewards(run, currentRoom, members);
     const gainedEffect = chooseRoomEffect(run, currentRoom);
+    const restHealing = currentRoom.room_type === "rest"
+      ? await applyRestHealing(run, members, 4)
+      : {
+        partyHitPoints: getRunHitPoints(run),
+        summaryLines: [],
+      };
     const nextRunEffects = gainedEffect
       ? [...getActiveRunEffects(run), gainedEffect]
       : getActiveRunEffects(run);
@@ -2833,7 +2944,9 @@ export async function handleCrawlerCallback(
         status: "completed",
         currentRoomId: currentRoom.id,
         currentFloorNumber: currentRoom.floor_number,
-        summary: buildRunSummary(run, {}, nextRunEffects),
+        summary: buildRunSummary(run, {
+          partyHitPoints: restHealing.partyHitPoints,
+        }, nextRunEffects),
       });
       await updateParty({
         partyId: party.id,
@@ -2848,6 +2961,7 @@ export async function handleCrawlerCallback(
           currentRoom,
           rewards,
           gainedEffect,
+          restHealing.summaryLines,
           null,
           memberCount,
         ),
@@ -2857,7 +2971,9 @@ export async function handleCrawlerCallback(
     await activateRoom(run, next);
     await updateAdventureRun({
       runId: run.id,
-      summary: buildRunSummary(run, {}, nextRunEffects),
+      summary: buildRunSummary(run, {
+        partyHitPoints: restHealing.partyHitPoints,
+      }, nextRunEffects),
     });
 
     return {
@@ -2867,6 +2983,7 @@ export async function handleCrawlerCallback(
         currentRoom,
         rewards,
         gainedEffect,
+        restHealing.summaryLines,
         next,
         memberCount,
       ),

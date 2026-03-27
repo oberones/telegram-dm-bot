@@ -278,6 +278,7 @@ Current crawler capabilities:
 - traverse combat, elite, boss, treasure, event, and rest rooms
 - resolve round-based PvE encounters against procedurally selected monsters
 - earn persistent loot, consumables, cumulative gold, and survivor-only encounter XP
+- recover HP through rest rooms and healing potions without resetting the whole run
 - inspect or resume the current crawler run with `/run`
 - inspect and use `/inventory` in DM
 - inspect and manage `/equipment` in DM
