@@ -262,6 +262,31 @@ test("processTelegramUpdate routes crawler callbacks before generic callbacks", 
   assert.deepEqual(sentMessages, [{ chatId: -100, text: "party callback" }]);
 });
 
+test("processTelegramUpdate routes compact crawler callbacks before generic callbacks", async () => {
+  const { app, sentMessages, answeredCallbacks } = buildTestApp();
+
+  await processTelegramUpdate(
+    app,
+    {
+      update_id: 120,
+      callback_query: {
+        id: "crawler-compact-callback",
+        data: "cr:ea:encounter-1:attack",
+        from: { id: 200, is_bot: false, first_name: "Bilbo" },
+        message: {
+          message_id: 1,
+          text: "Fight!",
+          chat: { id: -100, type: "group" },
+        },
+      },
+    },
+    buildDeps(),
+  );
+
+  assert.deepEqual(answeredCallbacks, [{ id: "crawler-compact-callback", text: "party ok" }]);
+  assert.deepEqual(sentMessages, [{ chatId: -100, text: "party callback" }]);
+});
+
 test("processTelegramUpdate routes reply-based disputes", async () => {
   const { app, sentMessages } = buildTestApp();
   let called = false;

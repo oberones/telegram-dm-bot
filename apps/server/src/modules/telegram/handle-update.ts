@@ -94,10 +94,12 @@ export async function processTelegramUpdate(
   deps: TelegramUpdateDeps = defaultDeps,
 ) {
   if (update.callback_query?.from && update.callback_query.message?.chat.id) {
-    if ((update.callback_query.data ?? "").startsWith("crawler:")) {
+    const callbackData = update.callback_query.data ?? "";
+
+    if (callbackData.startsWith("crawler:") || callbackData.startsWith("cr:")) {
       const result = await deps.handleCrawlerCallback(
         actorFromUser(update.callback_query.from),
-        update.callback_query.data ?? "",
+        callbackData,
       );
 
       if (result.alertText) {
