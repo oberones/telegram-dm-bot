@@ -122,6 +122,14 @@ export type CrawlerPartyStartCheck = {
   maximumMembers?: number;
 };
 
+function encounterActionCallbackData(encounterId: string, actionKey: EncounterPlayerActionKey) {
+  return `cr:ea:${encounterId}:${actionKey}`;
+}
+
+function encounterResumeCallbackData(encounterId: string) {
+  return `cr:er:${encounterId}`;
+}
+
 const ACTIVE_PARTY_MEMBER_STATUSES = new Set<PartyMemberDetailRecord["status"]>(["joined", "ready"]);
 let crawlerContentSeeded = false;
 
@@ -1197,7 +1205,7 @@ function formatEncounterActionPrompt(params: {
   });
   const actionButtons = aggregateEncounterActions(params.members, params.state).map((action) => ({
     text: action.label,
-    callback_data: `crawler:encounter:action:${params.encounterId}:${params.state.nextRound}:${action.key}`,
+    callback_data: encounterActionCallbackData(params.encounterId, action.key),
   }));
 
   return {
@@ -1301,7 +1309,7 @@ function formatRetreatSuccessMessage(params: {
     ? {
       inline_keyboard: [[{
         text: "Re-enter Encounter",
-        callback_data: `crawler:encounter:resume:${params.encounterId}:${params.room.id}`,
+        callback_data: encounterResumeCallbackData(params.encounterId),
       }]],
     }
     : undefined;
@@ -1904,7 +1912,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
         replyMarkup: {
           inline_keyboard: [[{
             text: "Re-enter Encounter",
-            callback_data: `crawler:encounter:resume:${pendingEncounter.id}:${pendingEncounter.room_id}`,
+            callback_data: encounterResumeCallbackData(pendingEncounter.id),
           }]],
         },
       };
@@ -3290,11 +3298,19 @@ export async function handleCrawlerCallback(
     };
   }
 
-  if (callbackData.startsWith("crawler:encounter:action:")) {
-    const [, , , encounterId, roundToken, actionToken] = callbackData.split(":");
-    const expectedRound = Number(roundToken);
+  if (callbackData.startsWith("crawler:encounter:action:") || callbackData.startsWith("cr:ea:")) {
+    const encounterId = callbackData.startsWith("cr:ea:")
+      ? callbackData.split(":")[2]
+      : callbackData.split(":")[3];
+    const actionToken = callbackData.startsWith("cr:ea:")
+      ? callbackData.split(":")[3]
+      : callbackData.split(":")[5];
+    const roundToken = callbackData.startsWith("cr:ea:")
+      ? null
+      : callbackData.split(":")[4];
+    const expectedRound = roundToken === null ? null : Number(roundToken);
 
-    if (!encounterId || !Number.isInteger(expectedRound) || !actionToken) {
+    if (!encounterId || !actionToken || (roundToken !== null && !Number.isInteger(expectedRound))) {
       return {
         alertText: "That combat action is invalid",
       };
@@ -3337,7 +3353,7 @@ export async function handleCrawlerCallback(
     const snapshot = getEncounterStateSnapshot(encounter.encounter_snapshot);
     const state = snapshot?.state;
 
-    if (!state || state.nextRound !== expectedRound) {
+    if (!state || (expectedRound !== null && state.nextRound !== expectedRound)) {
       return {
         alertText: "That combat prompt is stale",
       };
@@ -3737,19 +3753,21 @@ export async function handleCrawlerCallback(
     };
   }
 
-  if (callbackData.startsWith("crawler:encounter:resume:")) {
-    const [, , , encounterId, roomId] = callbackData.split(":");
+  if (callbackData.startsWith("crawler:encounter:resume:") || callbackData.startsWith("cr:er:")) {
+    const encounterId = callbackData.startsWith("cr:er:")
+      ? callbackData.slice("cr:er:".length)
+      : callbackData.split(":")[3];
 
-    if (!encounterId || !roomId) {
+    if (!encounterId) {
       return {
         alertText: "That encounter cannot be resumed",
       };
     }
 
     const encounter = await getEncounterById(encounterId);
-    const room = await getRunRoomDetailById(roomId);
+    const room = encounter ? await getRunRoomDetailById(encounter.room_id) : null;
 
-    if (!encounter || !room || encounter.room_id !== room.id) {
+    if (!encounter || !room) {
       return {
         alertText: "That encounter could not be found",
       };
