@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { EncounterState } from "@dm-bot/crawler-engine";
+
 import {
   applyHealing,
   applyEncounterDefeatToPartyMembers,
@@ -8,12 +10,17 @@ import {
   buildPartyLobbyButtonLabels,
   canStartCrawlerParty,
   describeRunPresentationState,
+  encounterActionLockAlertText,
+  encounterAvailableActionLabelsForMember,
   encounterActionKeysForClass,
   encounterXpForRoomType,
   formatEncounterSideSummaryLine,
   formatRunPartyRosterEntry,
   isEncounterRoundReadyToResolve,
   isEligibleForCrawlerParty,
+  lockedEncounterActionSummary,
+  retreatVoteProgressSummary,
+  waitingEncounterActionSummary,
 } from "./index.js";
 
 test("active users with active characters can join crawler parties", () => {
@@ -253,6 +260,29 @@ test("encounter action menus vary by class", () => {
   assert.deepEqual(encounterActionKeysForClass("rogue"), ["attack", "retreat"]);
   assert.deepEqual(encounterActionKeysForClass("wizard"), ["melee_attack", "fire_bolt", "magic_missile", "retreat"]);
   assert.deepEqual(encounterActionKeysForClass("cleric"), ["attack", "sacred_flame", "guiding_bolt", "retreat"]);
+  assert.deepEqual(
+    encounterAvailableActionLabelsForMember(
+      { class_key: "wizard", character_name: "Ignus" },
+      { spellSlotsLevel1: 1 },
+    ),
+    ["Melee Attack", "Cast Fire Bolt", "Cast Magic Missile", "Retreat"],
+  );
+  assert.deepEqual(
+    encounterAvailableActionLabelsForMember(
+      { class_key: "cleric", character_name: "Borin" },
+      { spellSlotsLevel1: 0 },
+    ),
+    ["Attack", "Cast Sacred Flame", "Retreat"],
+  );
+});
+
+test("encounter action lock feedback distinguishes first lock, duplicate lock, and action changes", () => {
+  assert.equal(encounterActionLockAlertText(undefined, "attack"), "Attack locked");
+  assert.equal(encounterActionLockAlertText("attack", "attack"), "Attack already locked");
+  assert.equal(
+    encounterActionLockAlertText("attack", "retreat"),
+    "Action changed: Attack -> Retreat",
+  );
 });
 
 test("encounter rounds only resolve once every living player has acted without a mixed retreat conflict", () => {
@@ -429,6 +459,432 @@ test("encounter rounds only resolve once every living player has acted without a
       },
     ),
     true,
+  );
+});
+
+test("waiting encounter summary lists only living players without locked actions", () => {
+  assert.deepEqual(
+    waitingEncounterActionSummary(
+      {
+        state: {
+          participants: [
+            {
+              id: "player-1-char-1",
+              name: "Alyndra",
+              side: "player",
+              classKey: "fighter",
+              currentHitPoints: 12,
+              maxHitPoints: 12,
+              hitPoints: 12,
+              armorClass: 16,
+              initiativeModifier: 1,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 8,
+              damageModifier: 3,
+              damageDealt: 0,
+            },
+            {
+              id: "player-2-char-2",
+              name: "Borin",
+              side: "player",
+              classKey: "cleric",
+              currentHitPoints: 0,
+              maxHitPoints: 10,
+              hitPoints: 0,
+              armorClass: 15,
+              initiativeModifier: 0,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 8,
+              damageModifier: 3,
+              damageDealt: 0,
+            },
+            {
+              id: "player-3-char-3",
+              name: "Ignus",
+              side: "player",
+              classKey: "wizard",
+              currentHitPoints: 8,
+              maxHitPoints: 8,
+              hitPoints: 8,
+              armorClass: 12,
+              initiativeModifier: 2,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 10,
+              damageModifier: 0,
+              damageDealt: 0,
+            },
+          ],
+          order: ["player-1-char-1", "player-2-char-2", "player-3-char-3"],
+          initiativeRolls: {},
+          nextRound: 1,
+          roundLimit: 12,
+        },
+        members: [
+          {
+            id: "pm-1",
+            party_id: "party-1",
+            user_id: "user-1",
+            character_id: "char-1",
+            status: "ready",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Alice",
+            telegram_username: "alice",
+            character_name: "Alyndra",
+            class_key: "fighter",
+          },
+          {
+            id: "pm-2",
+            party_id: "party-1",
+            user_id: "user-2",
+            character_id: "char-2",
+            status: "defeated",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Borin",
+            telegram_username: "borin",
+            character_name: "Borin",
+            class_key: "cleric",
+          },
+          {
+            id: "pm-3",
+            party_id: "party-1",
+            user_id: "user-3",
+            character_id: "char-3",
+            status: "ready",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Ignus",
+            telegram_username: "ignus",
+            character_name: "Ignus",
+            class_key: "wizard",
+          },
+        ],
+        playerActions: {
+          "player-1-char-1": "attack",
+        },
+      },
+    ),
+    ["Ignus"],
+  );
+});
+
+test("locked encounter summary lists only living players with committed actions", () => {
+  assert.deepEqual(
+    lockedEncounterActionSummary(
+      {
+        state: {
+          participants: [
+            {
+              id: "player-1-char-1",
+              name: "Alyndra",
+              side: "player",
+              classKey: "fighter",
+              currentHitPoints: 12,
+              maxHitPoints: 12,
+              hitPoints: 12,
+              armorClass: 16,
+              initiativeModifier: 1,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 8,
+              damageModifier: 3,
+              damageDealt: 0,
+            },
+            {
+              id: "player-2-char-2",
+              name: "Borin",
+              side: "player",
+              classKey: "cleric",
+              currentHitPoints: 0,
+              maxHitPoints: 10,
+              hitPoints: 0,
+              armorClass: 15,
+              initiativeModifier: 0,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 8,
+              damageModifier: 3,
+              damageDealt: 0,
+            },
+            {
+              id: "player-3-char-3",
+              name: "Ignus",
+              side: "player",
+              classKey: "wizard",
+              currentHitPoints: 8,
+              maxHitPoints: 8,
+              hitPoints: 8,
+              armorClass: 12,
+              initiativeModifier: 2,
+              attackModifier: 5,
+              damageDiceCount: 1,
+              damageDieSides: 10,
+              damageModifier: 0,
+              damageDealt: 0,
+            },
+          ],
+          order: ["player-1-char-1", "player-2-char-2", "player-3-char-3"],
+          initiativeRolls: {},
+          nextRound: 1,
+          roundLimit: 12,
+        },
+        members: [
+          {
+            id: "pm-1",
+            party_id: "party-1",
+            user_id: "user-1",
+            character_id: "char-1",
+            status: "ready",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Alice",
+            telegram_username: "alice",
+            character_name: "Alyndra",
+            class_key: "fighter",
+          },
+          {
+            id: "pm-2",
+            party_id: "party-1",
+            user_id: "user-2",
+            character_id: "char-2",
+            status: "ready",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Borin",
+            telegram_username: "borin",
+            character_name: "Borin",
+            class_key: "cleric",
+          },
+          {
+            id: "pm-3",
+            party_id: "party-1",
+            user_id: "user-3",
+            character_id: "char-3",
+            status: "ready",
+            joined_at: new Date("2026-03-26T12:00:00Z"),
+            ready_at: new Date("2026-03-26T12:01:00Z"),
+            left_at: null,
+            created_at: new Date("2026-03-26T12:00:00Z"),
+            updated_at: new Date("2026-03-26T12:01:00Z"),
+            user_display_name: "Ignus",
+            telegram_username: "ignus",
+            character_name: "Ignus",
+            class_key: "wizard",
+          },
+        ],
+        playerActions: {
+          "player-1-char-1": "attack",
+        },
+      },
+    ),
+    ["- Alyndra: Attack"],
+  );
+});
+
+test("encounter action summaries follow initiative order for living players", () => {
+  assert.deepEqual(
+    lockedEncounterActionSummary({
+      state: {
+        participants: [
+          {
+            id: "player-1-char-1",
+            name: "Alyndra",
+            side: "player",
+            classKey: "fighter",
+            currentHitPoints: 12,
+            maxHitPoints: 12,
+            hitPoints: 12,
+            armorClass: 16,
+            initiativeModifier: 1,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "player-2-char-2",
+            name: "Borin",
+            side: "player",
+            classKey: "cleric",
+            currentHitPoints: 10,
+            maxHitPoints: 10,
+            hitPoints: 10,
+            armorClass: 15,
+            initiativeModifier: 0,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "player-3-char-3",
+            name: "Ignus",
+            side: "player",
+            classKey: "wizard",
+            currentHitPoints: 8,
+            maxHitPoints: 8,
+            hitPoints: 8,
+            armorClass: 12,
+            initiativeModifier: 2,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 10,
+            damageModifier: 0,
+            damageDealt: 0,
+          },
+        ],
+        order: ["player-3-char-3", "player-1-char-1", "player-2-char-2"],
+        initiativeRolls: {},
+        nextRound: 1,
+        roundLimit: 12,
+      },
+      members: [
+        {
+          id: "pm-1",
+          party_id: "party-1",
+          user_id: "user-1",
+          character_id: "char-1",
+          status: "ready",
+          joined_at: new Date("2026-03-26T12:00:00Z"),
+          ready_at: new Date("2026-03-26T12:01:00Z"),
+          left_at: null,
+          created_at: new Date("2026-03-26T12:00:00Z"),
+          updated_at: new Date("2026-03-26T12:01:00Z"),
+          user_display_name: "Alice",
+          telegram_username: "alice",
+          character_name: "Alyndra",
+          class_key: "fighter",
+        },
+        {
+          id: "pm-2",
+          party_id: "party-1",
+          user_id: "user-2",
+          character_id: "char-2",
+          status: "ready",
+          joined_at: new Date("2026-03-26T12:00:00Z"),
+          ready_at: new Date("2026-03-26T12:01:00Z"),
+          left_at: null,
+          created_at: new Date("2026-03-26T12:00:00Z"),
+          updated_at: new Date("2026-03-26T12:01:00Z"),
+          user_display_name: "Borin",
+          telegram_username: "borin",
+          character_name: "Borin",
+          class_key: "cleric",
+        },
+        {
+          id: "pm-3",
+          party_id: "party-1",
+          user_id: "user-3",
+          character_id: "char-3",
+          status: "ready",
+          joined_at: new Date("2026-03-26T12:00:00Z"),
+          ready_at: new Date("2026-03-26T12:01:00Z"),
+          left_at: null,
+          created_at: new Date("2026-03-26T12:00:00Z"),
+          updated_at: new Date("2026-03-26T12:01:00Z"),
+          user_display_name: "Ignus",
+          telegram_username: "ignus",
+          character_name: "Ignus",
+          class_key: "wizard",
+        },
+      ],
+      playerActions: {
+        "player-1-char-1": "attack",
+        "player-3-char-3": "fire_bolt",
+      },
+    }),
+    ["- Ignus: Cast Fire Bolt", "- Alyndra: Attack"],
+  );
+});
+
+test("retreat vote progress only appears once at least one living player selects retreat", () => {
+  const state: EncounterState = {
+    participants: [
+      {
+        id: "player-1-char-1",
+        name: "Alyndra",
+        side: "player",
+        classKey: "fighter",
+        currentHitPoints: 12,
+        maxHitPoints: 12,
+        hitPoints: 12,
+        armorClass: 16,
+        initiativeModifier: 1,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+        damageDealt: 0,
+      },
+      {
+        id: "player-2-char-2",
+        name: "Borin",
+        side: "player",
+        classKey: "cleric",
+        currentHitPoints: 0,
+        maxHitPoints: 10,
+        hitPoints: 0,
+        armorClass: 15,
+        initiativeModifier: 0,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+        damageDealt: 0,
+      },
+      {
+        id: "player-3-char-3",
+        name: "Ignus",
+        side: "player",
+        classKey: "wizard",
+        currentHitPoints: 8,
+        maxHitPoints: 8,
+        hitPoints: 8,
+        armorClass: 12,
+        initiativeModifier: 2,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 0,
+        damageDealt: 0,
+      },
+    ],
+    order: ["player-3-char-3", "player-1-char-1", "player-2-char-2"],
+    initiativeRolls: {},
+    nextRound: 1,
+    roundLimit: 12,
+  };
+
+  assert.equal(retreatVoteProgressSummary({ state, playerActions: {} }), null);
+  assert.equal(
+    retreatVoteProgressSummary({
+      state,
+      playerActions: {
+        "player-3-char-3": "retreat",
+      },
+    }),
+    "Retreat votes: 1/2",
   );
 });
 

@@ -767,6 +767,21 @@ function encounterActionLabel(actionKey: EncounterPlayerActionKey) {
   return ENCOUNTER_PLAYER_ACTIONS.find((action) => action.key === actionKey)?.label ?? actionKey;
 }
 
+export function encounterActionLockAlertText(
+  priorAction: EncounterPlayerActionKey | undefined,
+  nextAction: EncounterPlayerActionKey,
+) {
+  if (priorAction === nextAction) {
+    return `${encounterActionLabel(nextAction)} already locked`;
+  }
+
+  if (priorAction) {
+    return `Action changed: ${encounterActionLabel(priorAction)} -> ${encounterActionLabel(nextAction)}`;
+  }
+
+  return `${encounterActionLabel(nextAction)} locked`;
+}
+
 export function encounterActionKeysForClass(classKey: PartyMemberDetailRecord["class_key"]) {
   return ENCOUNTER_PLAYER_ACTIONS.filter((action) => action.classes.includes(classKey)).map((action) => action.key);
 }
@@ -779,6 +794,29 @@ function playerParticipantForMember(state: EncounterState, member: PartyMemberDe
   return state.participants.find(
     (participant) => participant.side === "player" && participant.id.endsWith(member.character_id),
   ) ?? null;
+}
+
+function orderedLivingMemberParticipants(
+  state: EncounterState,
+  members: PartyMemberDetailRecord[],
+) {
+  const activePartyMembers = activeMembers(members);
+
+  return state.order.flatMap((participantId) => {
+    const participant = state.participants.find((entry) => entry.id === participantId);
+
+    if (!participant || participant.side !== "player" || participant.currentHitPoints <= 0) {
+      return [];
+    }
+
+    const member = activePartyMembers.find((entry) => participant.id.endsWith(entry.character_id));
+
+    if (!member) {
+      return [];
+    }
+
+    return [{ member, participant }];
+  });
 }
 
 function availableEncounterActionsForMember(
@@ -819,25 +857,77 @@ function aggregateEncounterActions(
   return ENCOUNTER_PLAYER_ACTIONS.filter((action) => definitions.has(action.key));
 }
 
-function pendingEncounterActionSummary(params: {
+export function encounterAvailableActionLabelsForMember(
+  member: Pick<PartyMemberDetailRecord, "class_key" | "character_name">,
+  participant: Pick<EncounterState["participants"][number], "spellSlotsLevel1"> | null,
+) {
+  return ENCOUNTER_PLAYER_ACTIONS
+    .filter((action) => {
+      if (!action.classes.includes(member.class_key)) {
+        return false;
+      }
+
+      if (action.key === "magic_missile" || action.key === "guiding_bolt") {
+        return (participant?.spellSlotsLevel1 ?? 0) > 0;
+      }
+
+      return true;
+    })
+    .map((action) => action.label);
+}
+
+export function lockedEncounterActionSummary(params: {
   state: EncounterState;
   members: PartyMemberDetailRecord[];
   playerActions: Record<string, EncounterPlayerActionKey>;
 }) {
-  const lines: string[] = [];
+  return orderedLivingMemberParticipants(params.state, params.members).flatMap(({ member, participant }) => {
+    const action = params.playerActions[participant.id];
 
-  for (const member of activeMembers(params.members)) {
-    const participant = playerParticipantForMember(params.state, member);
-
-    if (!participant || participant.currentHitPoints <= 0) {
-      continue;
+    if (!action) {
+      return [];
     }
 
-    const action = params.playerActions[participant.id];
-    lines.push(`- ${member.character_name}: ${action ? encounterActionLabel(action) : "Waiting"}`);
+    return [`- ${member.character_name}: ${encounterActionLabel(action)}`];
+  });
+}
+
+export function waitingEncounterActionSummary(params: {
+  state: EncounterState;
+  members: PartyMemberDetailRecord[];
+  playerActions: Record<string, EncounterPlayerActionKey>;
+}) {
+  return orderedLivingMemberParticipants(params.state, params.members).flatMap(({ member, participant }) => {
+    if (params.playerActions[participant.id]) {
+      return [];
+    }
+
+    return [member.character_name];
+  });
+}
+
+function availableEncounterActionSummary(params: {
+  state: EncounterState;
+  members: PartyMemberDetailRecord[];
+}) {
+  return orderedLivingMemberParticipants(params.state, params.members).flatMap(({ member, participant }) => {
+    const labels = encounterAvailableActionLabelsForMember(member, participant);
+    return [`- ${member.character_name}: ${labels.join(", ")}`];
+  });
+}
+
+export function retreatVoteProgressSummary(params: {
+  state: EncounterState;
+  playerActions: Record<string, EncounterPlayerActionKey>;
+}) {
+  const livingPlayers = livingPlayerParticipants(params.state);
+  const retreatVotes = livingPlayers.filter((participant) => params.playerActions[participant.id] === "retreat").length;
+
+  if (retreatVotes === 0) {
+    return null;
   }
 
-  return lines;
+  return `Retreat votes: ${retreatVotes}/${livingPlayers.length}`;
 }
 
 function unresolvedRetreatConflict(
@@ -1097,8 +1187,14 @@ function formatEncounterActionPrompt(params: {
   const monsterLines = summarizeEncounterSide(params.state.participants, "monster");
   const livingPlayers = livingPlayerParticipants(params.state);
   const submittedCount = livingPlayers.filter((participant) => params.playerActions[participant.id]).length;
-  const actionLines = pendingEncounterActionSummary(params);
+  const lockedActionLines = lockedEncounterActionSummary(params);
+  const waitingOn = waitingEncounterActionSummary(params);
+  const availableActionLines = availableEncounterActionSummary(params);
   const mixedRetreat = unresolvedRetreatConflict(params.state, params.playerActions);
+  const retreatVoteProgress = retreatVoteProgressSummary({
+    state: params.state,
+    playerActions: params.playerActions,
+  });
   const actionButtons = aggregateEncounterActions(params.members, params.state).map((action) => ({
     text: action.label,
     callback_data: `crawler:encounter:action:${params.encounterId}:${params.state.nextRound}:${action.key}`,
@@ -1112,6 +1208,7 @@ function formatEncounterActionPrompt(params: {
       `Theme: ${params.run.theme_key ?? "unknown"}`,
       `Round: ${params.state.nextRound}`,
       `Actions locked: ${submittedCount}/${livingPlayers.length}`,
+      ...(retreatVoteProgress ? [retreatVoteProgress] : []),
       "",
       "Party",
       ...(playerLines.length > 0 ? playerLines : ["- No surviving party members."]),
@@ -1119,8 +1216,14 @@ function formatEncounterActionPrompt(params: {
       "Enemies",
       ...(monsterLines.length > 0 ? monsterLines : ["- No surviving enemies."]),
       "",
-      "Selected Actions",
-      ...(actionLines.length > 0 ? actionLines : ["- No living players remain."]),
+      "Locked Actions",
+      ...(lockedActionLines.length > 0 ? lockedActionLines : ["- No actions locked yet."]),
+      "",
+      "Waiting On",
+      ...(waitingOn.length > 0 ? waitingOn.map((name) => `- ${name}`) : ["- Everyone is locked in."]),
+      "",
+      "Available Actions",
+      ...(availableActionLines.length > 0 ? availableActionLines : ["- No living players remain."]),
       "",
       mixedRetreat
         ? "Retreat requires unanimity. Change actions until everyone chooses Retreat, or switch back to combat actions."
@@ -1177,7 +1280,7 @@ function formatEncounterActionLockedMessage(params: {
     text: [
       "Action Locked",
       "",
-      ...pendingEncounterActionSummary(params),
+      ...lockedEncounterActionSummary(params),
       "",
       prompt.text,
     ].join("\n"),
@@ -3280,9 +3383,7 @@ export async function handleCrawlerCallback(
       return {
         alertText: mixedRetreat
           ? "Retreat requires every living player to choose Retreat"
-          : priorAction === actionKey
-            ? `${encounterActionLabel(actionKey)} already locked`
-            : `${encounterActionLabel(actionKey)} locked`,
+          : encounterActionLockAlertText(priorAction, actionKey),
         message: formatEncounterActionLockedMessage({
           run,
           room,
