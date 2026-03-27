@@ -1457,6 +1457,16 @@ export function describeRunPresentationState(params: {
     };
   }
 
+  if (params.runStatus === "cancelled") {
+    return {
+      heading: "Crawler Run Cancelled",
+      actionLine: "This run was cancelled and cannot be resumed.",
+      actionable: false,
+      buttonAllowed: false,
+      showRoomPrompt: false,
+    };
+  }
+
   if (
     params.runStatus === "awaiting_choice" &&
     params.hasCurrentRoom &&

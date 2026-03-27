@@ -674,6 +674,26 @@ export function App() {
     }
   }
 
+  async function cancelCrawlerRun(runId: string) {
+    const reason = window.prompt("Why are you cancelling this crawler run?")?.trim();
+
+    if (!reason) {
+      setError("A crawler run cancellation reason is required.");
+      return;
+    }
+
+    try {
+      await fetchJson(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      await refreshAdminData();
+      setSelectedRunId(runId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Crawler run cancellation failed");
+    }
+  }
+
   async function markCrawlerEncounterErrored(encounterId: string) {
     const reason = window.prompt("Why are you marking this crawler encounter errored?")?.trim();
 
@@ -1087,6 +1107,14 @@ export function App() {
                       type="button"
                     >
                       Fail run
+                    </button>
+                    <button
+                      className="table-action"
+                      disabled={!moderationEnabled}
+                      onClick={() => void cancelCrawlerRun(run.id)}
+                      type="button"
+                    >
+                      Cancel run
                     </button>
                   </div>
                 </div>

@@ -69,6 +69,18 @@ test("combat or errored crawler runs get administrative failure hints", () => {
   );
 });
 
+test("cancelled crawler runs report that no further recovery is expected", () => {
+  assert.match(
+    explainFlaggedCrawlerRun({
+      status: "cancelled",
+      currentRoomId: "room-1",
+      activeEncounterId: null,
+      failureReason: "Cancelled by admin.",
+    }),
+    /no further recovery is expected/i,
+  );
+});
+
 test("active crawler encounters get a conservative error-marking hint", () => {
   assert.match(
     explainFlaggedCrawlerEncounter({

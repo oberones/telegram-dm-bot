@@ -741,6 +741,131 @@ export function registerAdminApiRoutes(app: FastifyInstance, deps: AdminRouteDep
     };
   });
 
+  app.post("/api/runs/:id/cancel", async (request, reply) => {
+    const auth = await deps.requireAdminAuth(app, request, reply);
+
+    if (!auth) {
+      return {
+        error: "Unauthorized",
+      };
+    }
+
+    if (!deps.requireAdminRole(auth.adminUser.role, ["super_admin", "operator"])) {
+      reply.code(403);
+      return { error: "Your role cannot cancel crawler runs" };
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = body.reason?.trim();
+
+    if (!reason) {
+      reply.code(400);
+      return { error: "A crawler run cancellation reason is required" };
+    }
+
+    const run = await deps.getAdventureRunById(id);
+
+    if (!run) {
+      reply.code(404);
+      return { error: "Crawler run not found" };
+    }
+
+    if (["completed", "failed", "abandoned", "cancelled"].includes(run.status)) {
+      reply.code(409);
+      return { error: "Only active, paused, or errored crawler runs can be cancelled" };
+    }
+
+    const party = await deps.getPartyById(run.party_id);
+
+    if (!party) {
+      reply.code(404);
+      return { error: "Crawler party not found" };
+    }
+
+    const [members, encounters, currentRoom] = await Promise.all([
+      deps.listPartyMemberDetails(party.id),
+      deps.listEncountersForRun(run.id),
+      run.current_room_id ? deps.getRunRoomDetailById(run.current_room_id) : Promise.resolve(null),
+    ]);
+
+    const cancellableEncounters = encounters.filter((encounter) => ["queued", "active", "error"].includes(encounter.status));
+
+    await Promise.all(
+      cancellableEncounters.map((encounter) => deps.updateEncounter({
+        encounterId: encounter.id,
+        status: "cancelled",
+      })),
+    );
+
+    if (currentRoom && currentRoom.resolved_at === null && currentRoom.status !== "failed" && currentRoom.status !== "skipped") {
+      await deps.updateRunRoom({
+        roomId: currentRoom.id,
+        status: "skipped",
+        resolved: true,
+      });
+    }
+
+    const cancelledRun = await deps.updateAdventureRun({
+      runId: run.id,
+      status: "cancelled",
+      currentFloorNumber: currentRoom?.floor_number ?? run.current_floor_number ?? null,
+      currentRoomId: currentRoom?.id ?? run.current_room_id ?? null,
+      activeEncounterId: null,
+      failureReason: reason,
+      summary: {
+        ...(run.summary ?? {}),
+        adminRecovery: {
+          action: "run_cancelled_by_admin",
+          reason,
+          actorAdminUserId: auth.adminUser.id,
+          cancelledAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    await deps.updateParty({
+      partyId: party.id,
+      status: "cancelled",
+      activeRunId: null,
+    });
+
+    await deps.createAuditLog({
+      actorType: "admin_user",
+      actorAdminUserId: auth.adminUser.id,
+      action: "crawler_run_cancelled_by_admin",
+      targetType: "adventure_run",
+      targetId: run.id,
+      reason,
+      metadata: {
+        partyId: party.id,
+        previousStatus: run.status,
+        currentRoomId: run.current_room_id,
+        cancelledEncounterCount: cancellableEncounters.length,
+      },
+    });
+
+    const notificationText = [
+      "An administrator cancelled a crawler run.",
+      `Run: ${run.id}`,
+      `Reason: ${reason}`,
+    ].join("\n");
+
+    for (const member of members) {
+      const user = await deps.getUserById(member.user_id);
+
+      if (user) {
+        await app.telegram.sendMessage(user.telegram_user_id, {
+          text: notificationText,
+        });
+      }
+    }
+
+    return {
+      run: cancelledRun ?? run,
+    };
+  });
+
   app.post("/api/encounters/:id/error", async (request, reply) => {
     const auth = await deps.requireAdminAuth(app, request, reply);
 

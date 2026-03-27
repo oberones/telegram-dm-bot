@@ -830,6 +830,168 @@ test("POST /api/runs/:id/fail fails stuck crawler runs, audits, and notifies par
   assert.match(sentMessages[0]!.text, /closed a crawler run/);
 });
 
+test("POST /api/runs/:id/cancel cancels active crawler runs, audits, and notifies party members", async () => {
+  const auditCalls: unknown[] = [];
+  const cancelledEncounters: string[] = [];
+  const { app, sentMessages } = buildTestApp({
+    getAdventureRunById: async () => ({
+      id: "run-1",
+      party_id: "party-1",
+      status: "awaiting_choice",
+      seed: "seed-1",
+      generation_version: "crawler-v1",
+      theme_key: "crypt",
+      rules_version_id: "rules-1",
+      floor_count: 3,
+      current_floor_number: 1,
+      current_room_id: "room-1",
+      active_encounter_id: null,
+      difficulty_tier: 1,
+      summary: {},
+      started_at: new Date(),
+      completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    getPartyById: async () => ({
+      id: "party-1",
+      leader_user_id: "user-1",
+      status: "in_run",
+      active_run_id: "run-1",
+      party_name: "Crawler Party",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    listPartyMemberDetails: async () => [
+      {
+        id: "member-1",
+        party_id: "party-1",
+        user_id: "user-1",
+        character_id: "char-1",
+        status: "ready",
+        joined_at: new Date(),
+        ready_at: new Date(),
+        left_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        user_display_name: "Bilbo",
+        telegram_username: "bilbo",
+        character_name: "Rheen",
+        class_key: "fighter",
+      },
+      {
+        id: "member-2",
+        party_id: "party-1",
+        user_id: "user-2",
+        character_id: "char-2",
+        status: "ready",
+        joined_at: new Date(),
+        ready_at: new Date(),
+        left_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        user_display_name: "Frodo",
+        telegram_username: "frodo",
+        character_name: "Ignus",
+        class_key: "wizard",
+      },
+    ],
+    getRunRoomDetailById: async () => ({
+      id: "room-1",
+      run_id: "run-1",
+      floor_id: "floor-1",
+      floor_number: 1,
+      room_number: 2,
+      room_type: "combat",
+      status: "active",
+      template_key: "combat:test",
+      prompt_payload: {},
+      generation_payload: {},
+      entered_at: new Date(),
+      resolved_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    listEncountersForRun: async () => [
+      {
+        id: "encounter-1",
+        run_id: "run-1",
+        room_id: "room-1",
+        status: "active",
+        encounter_key: "combat:test",
+        encounter_snapshot: {},
+        started_at: new Date(),
+        completed_at: null,
+        errored_at: null,
+        error_summary: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ],
+    updateEncounter: async ({ encounterId }) => {
+      cancelledEncounters.push(encounterId);
+      return null;
+    },
+    updateRunRoom: async () => null,
+    updateAdventureRun: async () => ({
+      id: "run-1",
+      party_id: "party-1",
+      status: "cancelled",
+      seed: "seed-1",
+      generation_version: "crawler-v1",
+      theme_key: "crypt",
+      rules_version_id: "rules-1",
+      floor_count: 3,
+      current_floor_number: 1,
+      current_room_id: "room-1",
+      active_encounter_id: null,
+      difficulty_tier: 1,
+      summary: {
+        adminRecovery: {
+          action: "run_cancelled_by_admin",
+        },
+      },
+      started_at: new Date(),
+      completed_at: new Date(),
+      failed_at: null,
+      failure_reason: "Party requested stop",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    updateParty: async () => null,
+    getUserById: async (id: string) => ({
+      id,
+      telegram_user_id: `${id}-tg`,
+      telegram_username: null,
+      telegram_first_name: null,
+      telegram_last_name: null,
+      display_name: id,
+      status: "active",
+    }),
+    createAuditLog: async (params) => {
+      auditCalls.push(params);
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/runs/run-1/cancel",
+    payload: {
+      reason: "Party requested stop",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().run.status, "cancelled");
+  assert.deepEqual(cancelledEncounters, ["encounter-1"]);
+  assert.equal(auditCalls.length, 1);
+  assert.equal(sentMessages.length, 2);
+  assert.match(sentMessages[0]!.text, /cancelled a crawler run/i);
+  assert.match(sentMessages[0]!.text, /Party requested stop/);
+});
+
 test("POST /api/encounters/:id/error marks a stuck crawler encounter errored, pauses the run, audits, and notifies party members", async () => {
   const auditCalls: unknown[] = [];
   const { app, sentMessages } = buildTestApp({

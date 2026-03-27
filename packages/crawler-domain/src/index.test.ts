@@ -156,6 +156,23 @@ test("completed or stale runs are inspect-only and cannot be resumed", () => {
 
   assert.deepEqual(
     describeRunPresentationState({
+      runStatus: "cancelled",
+      roomStatus: "skipped",
+      roomResolvedAt: new Date("2026-03-26T12:00:00Z"),
+      surface: "group",
+      hasCurrentRoom: true,
+    }),
+    {
+      heading: "Crawler Run Cancelled",
+      actionLine: "This run was cancelled and cannot be resumed.",
+      actionable: false,
+      buttonAllowed: false,
+      showRoomPrompt: false,
+    },
+  );
+
+  assert.deepEqual(
+    describeRunPresentationState({
       runStatus: "paused",
       roomStatus: "completed",
       roomResolvedAt: new Date("2026-03-26T12:00:00Z"),

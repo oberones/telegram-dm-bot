@@ -46,6 +46,10 @@ export function explainFlaggedCrawlerRun(params: {
   activeEncounterId?: string | null;
   failureReason?: string | null;
 }) {
+  if (params.status === "cancelled") {
+    return "Run was cancelled by an administrator and no further recovery is expected.";
+  }
+
   if (params.status === "error") {
     return params.failureReason?.trim() || "Run entered an error state and should be failed administratively.";
   }
