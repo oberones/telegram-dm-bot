@@ -1,6 +1,6 @@
 {
   "name": "@dm-bot/server",
-  "version": "0.29.1",
+  "version": "0.30.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -12,10 +12,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@dm-bot/crawler-domain": "0.29.1",
-    "@dm-bot/db": "0.29.1",
-    "@dm-bot/domain": "0.29.1",
-    "@dm-bot/shared": "0.29.1",
+    "@dm-bot/crawler-domain": "0.30.0",
+    "@dm-bot/db": "0.30.0",
+    "@dm-bot/domain": "0.30.0",
+    "@dm-bot/shared": "0.30.0",
     "fastify": "^5.2.1"
   },
   "devDependencies": {

@@ -1,3 +1,13 @@
+## 0.30.0 (2026-03-27)
+
+### Feat
+
+- first pass at turn based per-player combat
+
+### Refactor
+
+- improve turn based experience
+
 ## 0.29.1 (2026-03-27)
 
 ### Fix
