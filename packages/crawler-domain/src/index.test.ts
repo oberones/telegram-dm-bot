@@ -8,9 +8,11 @@ import {
   buildPartyLobbyButtonLabels,
   canStartCrawlerParty,
   describeRunPresentationState,
+  encounterActionKeysForClass,
   encounterXpForRoomType,
   formatEncounterSideSummaryLine,
   formatRunPartyRosterEntry,
+  isEncounterRoundReadyToResolve,
   isEligibleForCrawlerParty,
 } from "./index.js";
 
@@ -243,6 +245,190 @@ test("encounter xp only goes to surviving active party members", () => {
       characterName: "Alyndra",
       xpGranted: 25,
     }],
+  );
+});
+
+test("encounter action menus vary by class", () => {
+  assert.deepEqual(encounterActionKeysForClass("fighter"), ["attack", "retreat"]);
+  assert.deepEqual(encounterActionKeysForClass("rogue"), ["attack", "retreat"]);
+  assert.deepEqual(encounterActionKeysForClass("wizard"), ["melee_attack", "fire_bolt", "magic_missile", "retreat"]);
+  assert.deepEqual(encounterActionKeysForClass("cleric"), ["attack", "sacred_flame", "guiding_bolt", "retreat"]);
+});
+
+test("encounter rounds only resolve once every living player has acted without a mixed retreat conflict", () => {
+  assert.equal(
+    isEncounterRoundReadyToResolve(
+      {
+        participants: [
+          {
+            id: "player-1-char-1",
+            name: "Alyndra",
+            side: "player",
+            classKey: "fighter",
+            currentHitPoints: 12,
+            maxHitPoints: 12,
+            hitPoints: 12,
+            armorClass: 16,
+            initiativeModifier: 1,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "player-2-char-2",
+            name: "Borin",
+            side: "player",
+            classKey: "cleric",
+            currentHitPoints: 10,
+            maxHitPoints: 10,
+            hitPoints: 10,
+            armorClass: 15,
+            initiativeModifier: 0,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "monster-1-warg",
+            name: "Warg",
+            side: "monster",
+            monsterRole: "brute",
+            currentHitPoints: 11,
+            maxHitPoints: 11,
+            hitPoints: 11,
+            armorClass: 13,
+            initiativeModifier: 2,
+            attackModifier: 5,
+            damageDiceCount: 2,
+            damageDieSides: 4,
+            damageModifier: 2,
+            damageDealt: 0,
+          },
+        ],
+        order: ["player-1-char-1", "player-2-char-2", "monster-1-warg"],
+        initiativeRolls: {
+          "player-1-char-1": 12,
+          "player-2-char-2": 9,
+          "monster-1-warg": 8,
+        },
+        nextRound: 1,
+        roundLimit: 12,
+      },
+      {
+        "player-1-char-1": "attack",
+      },
+    ),
+    false,
+  );
+
+  assert.equal(
+    isEncounterRoundReadyToResolve(
+      {
+        participants: [
+          {
+            id: "player-1-char-1",
+            name: "Alyndra",
+            side: "player",
+            classKey: "fighter",
+            currentHitPoints: 12,
+            maxHitPoints: 12,
+            hitPoints: 12,
+            armorClass: 16,
+            initiativeModifier: 1,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "player-2-char-2",
+            name: "Borin",
+            side: "player",
+            classKey: "cleric",
+            currentHitPoints: 10,
+            maxHitPoints: 10,
+            hitPoints: 10,
+            armorClass: 15,
+            initiativeModifier: 0,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+        ],
+        order: ["player-1-char-1", "player-2-char-2"],
+        initiativeRolls: {
+          "player-1-char-1": 12,
+          "player-2-char-2": 9,
+        },
+        nextRound: 1,
+        roundLimit: 12,
+      },
+      {
+        "player-1-char-1": "retreat",
+        "player-2-char-2": "attack",
+      },
+    ),
+    false,
+  );
+
+  assert.equal(
+    isEncounterRoundReadyToResolve(
+      {
+        participants: [
+          {
+            id: "player-1-char-1",
+            name: "Alyndra",
+            side: "player",
+            classKey: "fighter",
+            currentHitPoints: 12,
+            maxHitPoints: 12,
+            hitPoints: 12,
+            armorClass: 16,
+            initiativeModifier: 1,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+          {
+            id: "player-2-char-2",
+            name: "Borin",
+            side: "player",
+            classKey: "cleric",
+            currentHitPoints: 10,
+            maxHitPoints: 10,
+            hitPoints: 10,
+            armorClass: 15,
+            initiativeModifier: 0,
+            attackModifier: 5,
+            damageDiceCount: 1,
+            damageDieSides: 8,
+            damageModifier: 3,
+            damageDealt: 0,
+          },
+        ],
+        order: ["player-1-char-1", "player-2-char-2"],
+        initiativeRolls: {
+          "player-1-char-1": 12,
+          "player-2-char-2": 9,
+        },
+        nextRound: 1,
+        roundLimit: 12,
+      },
+      {
+        "player-1-char-1": "attack",
+        "player-2-char-2": "guiding_bolt",
+      },
+    ),
+    true,
   );
 });
 

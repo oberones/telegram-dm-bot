@@ -215,6 +215,109 @@ test("encounters can resolve one round at a time from persisted state", () => {
   assert.ok(firstRound.events.some((event) => event.type === "encounter_end"));
 });
 
+test("player-selected wizard spell actions resolve and spend spell slots", () => {
+  const rng = createDeterministicRandomSource([15, 3, 14, 4, 5, 3]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Ignus",
+        side: "player",
+        classKey: "wizard",
+        spellSlotsLevel1: 1,
+        dexteritySaveModifier: 2,
+        initiativeModifier: 2,
+        armorClass: 12,
+        hitPoints: 8,
+        maxHitPoints: 8,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 0,
+      },
+      {
+        id: "monster-1",
+        name: "Goblin Sneak",
+        side: "monster",
+        monsterRole: "skirmisher",
+        dexteritySaveModifier: 2,
+        spellSlotsLevel1: 0,
+        initiativeModifier: 1,
+        armorClass: 13,
+        hitPoints: 7,
+        maxHitPoints: 7,
+        attackModifier: 4,
+        damageDiceCount: 1,
+        damageDieSides: 6,
+        damageModifier: 2,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(
+    initialized.state,
+    { "player-1": "magic_missile" },
+    rng,
+  );
+
+  assert.ok(firstRound.events.some((event) => event.type === "attack" && event.summary.includes("Magic Missile")));
+  assert.equal(
+    firstRound.state.participants.find((participant) => participant.id === "player-1")?.spellSlotsLevel1,
+    0,
+  );
+});
+
+test("cleric sacred flame uses a save-based action when selected", () => {
+  const rng = createDeterministicRandomSource([12, 5, 4, 6, 15, 4]);
+  const initialized = initializeEncounterState({
+    participants: [
+      {
+        id: "player-1",
+        name: "Borin",
+        side: "player",
+        classKey: "cleric",
+        spellSlotsLevel1: 1,
+        dexteritySaveModifier: 0,
+        initiativeModifier: 0,
+        armorClass: 15,
+        hitPoints: 10,
+        maxHitPoints: 10,
+        attackModifier: 5,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 3,
+      },
+      {
+        id: "monster-1",
+        name: "Giant Rat",
+        side: "monster",
+        monsterRole: "minion",
+        dexteritySaveModifier: 1,
+        spellSlotsLevel1: 0,
+        initiativeModifier: 1,
+        armorClass: 11,
+        hitPoints: 4,
+        maxHitPoints: 4,
+        attackModifier: 3,
+        damageDiceCount: 1,
+        damageDieSides: 4,
+        damageModifier: 1,
+      },
+    ],
+    rng,
+  });
+
+  const firstRound = resolveEncounterRound(
+    initialized.state,
+    { "player-1": "sacred_flame" },
+    rng,
+  );
+
+  assert.ok(firstRound.events.some((event) => event.type === "attack" && event.summary.includes("Sacred Flame")));
+  assert.ok(firstRound.events.some((event) => event.type === "damage"));
+});
+
 test("monster target selection randomizes among equal-hp candidates", () => {
   const rng = createDeterministicRandomSource([5, 4, 20, 2, 15, 4]);
   const initialized = initializeEncounterState({

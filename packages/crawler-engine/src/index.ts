@@ -4,7 +4,10 @@ export type EncounterParticipant = {
   id: string;
   name: string;
   side: EncounterSide;
+  classKey?: "fighter" | "rogue" | "wizard" | "cleric";
   monsterRole?: "minion" | "brute" | "skirmisher" | "caster" | "support" | "elite" | "boss";
+  dexteritySaveModifier?: number;
+  spellSlotsLevel1?: number;
   initiativeModifier: number;
   armorClass: number;
   hitPoints: number;
@@ -101,7 +104,20 @@ export type ResolveEncounterInput = {
 export type EncounterStateParticipant = EncounterParticipant & {
   currentHitPoints: number;
   damageDealt: number;
+  guidingBoltMark?: {
+    sourceId: string;
+    grantedRound: number;
+  };
 };
+
+export type EncounterPlayerActionKey =
+  | "attack"
+  | "melee_attack"
+  | "fire_bolt"
+  | "magic_missile"
+  | "sacred_flame"
+  | "guiding_bolt"
+  | "retreat";
 
 export type EncounterState = {
   participants: EncounterStateParticipant[];
@@ -210,8 +226,12 @@ export function initializeEncounterState(input: ResolveEncounterInput): Encounte
 
 export function resolveEncounterRound(
   state: EncounterState,
-  rng: RandomSource = defaultRandomSource,
+  playerActionsOrRng: Record<string, EncounterPlayerActionKey> | RandomSource = {},
+  maybeRng: RandomSource = defaultRandomSource,
 ): EncounterRoundResult {
+  const usingLegacySignature = isRandomSource(playerActionsOrRng);
+  const playerActions = usingLegacySignature ? {} : playerActionsOrRng;
+  const rng = usingLegacySignature ? playerActionsOrRng : maybeRng;
   const participants = cloneStateParticipants(state.participants);
   const round = state.nextRound;
   const events: EncounterEvent[] = [];
@@ -245,7 +265,11 @@ export function resolveEncounterRound(
       summary: `Round ${round}: ${actor.name} acts.`,
     });
 
-    performAttack(participants, actor, target, round, rng, events);
+    if (actor.side === "player") {
+      resolvePlayerAction(participants, actor, target, round, playerActions[actor.id], rng, events);
+    } else {
+      performAttack(participants, actor, target, round, rng, events);
+    }
 
     const winningSide = checkWinningSide(participants);
 
@@ -410,6 +434,10 @@ function cloneStateParticipants(participants: EncounterStateParticipant[]): Muta
   return participants.map((participant) => ({ ...participant }));
 }
 
+function isRandomSource(value: Record<string, EncounterPlayerActionKey> | RandomSource): value is RandomSource {
+  return typeof (value as RandomSource).rollDie === "function";
+}
+
 function chooseTarget(
   participants: MutableEncounterParticipant[],
   actor: MutableEncounterParticipant,
@@ -479,47 +507,177 @@ function monsterTargetPriorityScore(
   }
 }
 
-function performAttack(
+function resolvePlayerAction(
   participants: MutableEncounterParticipant[],
   actor: MutableEncounterParticipant,
   target: MutableEncounterParticipant,
   round: number,
+  selectedAction: EncounterPlayerActionKey | undefined,
   rng: RandomSource,
   events: EncounterEvent[],
-  openingSummary?: string,
 ) {
-  if (openingSummary) {
-    events.push({
-      type: "turn_start",
-      round,
-      participantId: actor.id,
-      summary: openingSummary,
-    });
+  const action = buildPlayerActionProfile(actor, selectedAction);
+
+  if (action.save) {
+    resolveSavingThrowAction(actor, target, action, round, rng, events);
+    return;
   }
 
-  const attackRoll = rng.rollDie(20);
-  const total = attackRoll + actor.attackModifier;
-  const isHit = total >= target.armorClass;
+  performAttack(
+    participants,
+    actor,
+    target,
+    round,
+    rng,
+    events,
+    undefined,
+    action.actionKey,
+    action.attackModifier,
+    action.damageDiceCount,
+    action.damageDieSides,
+    action.damageModifier,
+    action.autoHit,
+    action.appliesGuidingBolt,
+  );
+}
+
+function buildPlayerActionProfile(
+  actor: MutableEncounterParticipant,
+  selectedAction: EncounterPlayerActionKey | undefined,
+) {
+  const actionKey = normalizePlayerActionKey(actor, selectedAction);
+
+  switch (actionKey) {
+    case "magic_missile":
+      return {
+        actionKey: "Magic Missile",
+        attackModifier: 0,
+        damageDiceCount: 3,
+        damageDieSides: 4,
+        damageModifier: 3,
+        autoHit: true,
+        save: null,
+        appliesGuidingBolt: false,
+      };
+    case "guiding_bolt":
+      return {
+        actionKey: "Guiding Bolt",
+        attackModifier: actor.attackModifier,
+        damageDiceCount: 4,
+        damageDieSides: 6,
+        damageModifier: 0,
+        autoHit: false,
+        save: null,
+        appliesGuidingBolt: true,
+      };
+    case "sacred_flame":
+      return {
+        actionKey: "Sacred Flame",
+        attackModifier: 0,
+        damageDiceCount: 1,
+        damageDieSides: 8,
+        damageModifier: 0,
+        autoHit: false,
+        save: {
+          type: "dex" as const,
+          dc: 8 + actor.attackModifier,
+        },
+        appliesGuidingBolt: false,
+      };
+    case "fire_bolt":
+      return {
+        actionKey: "Fire Bolt",
+        attackModifier: actor.attackModifier,
+        damageDiceCount: 1,
+        damageDieSides: 10,
+        damageModifier: 0,
+        autoHit: false,
+        save: null,
+        appliesGuidingBolt: false,
+      };
+    case "melee_attack":
+      return {
+        actionKey: "Melee Attack",
+        attackModifier: Math.max(0, actor.attackModifier - 2),
+        damageDiceCount: 1,
+        damageDieSides: 6,
+        damageModifier: Math.max(0, actor.damageModifier - 1),
+        autoHit: false,
+        save: null,
+        appliesGuidingBolt: false,
+      };
+    case "attack":
+    default:
+      return {
+        actionKey: "Attack",
+        attackModifier: actor.attackModifier,
+        damageDiceCount: actor.damageDiceCount,
+        damageDieSides: actor.damageDieSides,
+        damageModifier: actor.damageModifier,
+        autoHit: false,
+        save: null,
+        appliesGuidingBolt: false,
+      };
+  }
+}
+
+function normalizePlayerActionKey(
+  actor: MutableEncounterParticipant,
+  selectedAction: EncounterPlayerActionKey | undefined,
+): Exclude<EncounterPlayerActionKey, "retreat"> {
+  if (!selectedAction || selectedAction === "retreat") {
+    return actor.classKey === "wizard" ? "fire_bolt" : actor.classKey === "cleric" ? "attack" : "attack";
+  }
+
+  if (selectedAction === "magic_missile" && (actor.spellSlotsLevel1 ?? 0) <= 0) {
+    return "fire_bolt";
+  }
+
+  if (selectedAction === "guiding_bolt" && (actor.spellSlotsLevel1 ?? 0) <= 0) {
+    return "attack";
+  }
+
+  return selectedAction;
+}
+
+function resolveSavingThrowAction(
+  actor: MutableEncounterParticipant,
+  target: MutableEncounterParticipant,
+  action: {
+    actionKey: string;
+    damageDiceCount: number;
+    damageDieSides: number;
+    damageModifier: number;
+    save: { type: "dex"; dc: number };
+  },
+  round: number,
+  rng: RandomSource,
+  events: EncounterEvent[],
+) {
+  const saveRoll = rng.rollDie(20);
+  const modifier = action.save.type === "dex" ? (target.dexteritySaveModifier ?? 0) : 0;
+  const total = saveRoll + modifier;
+  const isSuccess = total >= action.save.dc;
 
   events.push({
     type: "attack",
     round,
     participantId: actor.id,
     targetId: target.id,
-    attackRoll,
-    attackModifier: actor.attackModifier,
+    attackRoll: saveRoll,
+    attackModifier: modifier,
     total,
-    targetArmorClass: target.armorClass,
-    isHit,
-    summary: `${actor.name} attacks ${target.name}: d20=${attackRoll} + ${actor.attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
+    targetArmorClass: action.save.dc,
+    isHit: !isSuccess,
+    summary: `${target.name} braces against ${action.actionKey}: d20=${saveRoll} + ${modifier} = ${total} vs DC ${action.save.dc}${isSuccess ? " success" : " fail"}.`,
   });
 
-  if (!isHit) {
+  if (isSuccess) {
     return;
   }
 
-  const rolls = Array.from({ length: actor.damageDiceCount }, () => rng.rollDie(actor.damageDieSides));
-  const totalDamage = rolls.reduce((sum, value) => sum + value, 0) + actor.damageModifier;
+  const rolls = Array.from({ length: action.damageDiceCount }, () => rng.rollDie(action.damageDieSides));
+  const totalDamage = Math.max(0, rolls.reduce((sum, value) => sum + value, 0) + action.damageModifier);
   const before = target.currentHitPoints;
   target.currentHitPoints = Math.max(0, target.currentHitPoints - totalDamage);
   actor.damageDealt += totalDamage;
@@ -530,12 +688,142 @@ function performAttack(
     participantId: actor.id,
     targetId: target.id,
     rolls,
-    modifier: actor.damageModifier,
+    modifier: action.damageModifier,
     total: totalDamage,
     targetHpBefore: before,
     targetHpAfter: target.currentHitPoints,
-    summary: `${actor.name} deals ${totalDamage} damage to ${target.name} (${before} -> ${target.currentHitPoints}).`,
+    summary: `${action.actionKey} catches ${target.name} for ${totalDamage} damage (${before} -> ${target.currentHitPoints}).`,
   });
+}
+
+function performAttack(
+  participants: MutableEncounterParticipant[],
+  actor: MutableEncounterParticipant,
+  target: MutableEncounterParticipant,
+  round: number,
+  rng: RandomSource,
+  events: EncounterEvent[],
+  openingSummary?: string,
+  actionKey = "Attack",
+  attackModifier = actor.attackModifier,
+  damageDiceCount = actor.damageDiceCount,
+  damageDieSides = actor.damageDieSides,
+  damageModifier = actor.damageModifier,
+  autoHit = false,
+  appliesGuidingBolt = false,
+) {
+  if (openingSummary) {
+    events.push({
+      type: "turn_start",
+      round,
+      participantId: actor.id,
+      summary: openingSummary,
+    });
+  }
+
+  if (autoHit) {
+    spendEncounterResourceIfNeeded(actor, actionKey);
+    const rolls = Array.from({ length: damageDiceCount }, () => rng.rollDie(damageDieSides));
+    const totalDamage = Math.max(0, rolls.reduce((sum, value) => sum + value, 0) + damageModifier);
+    const before = target.currentHitPoints;
+    target.currentHitPoints = Math.max(0, target.currentHitPoints - totalDamage);
+    actor.damageDealt += totalDamage;
+
+    events.push({
+      type: "attack",
+      round,
+      participantId: actor.id,
+      targetId: target.id,
+      attackRoll: 0,
+      attackModifier: 0,
+      total: 0,
+      targetArmorClass: target.armorClass,
+      isHit: true,
+      summary: `${actor.name} unleashes ${actionKey}. It hits automatically.`,
+    });
+    events.push({
+      type: "damage",
+      round,
+      participantId: actor.id,
+      targetId: target.id,
+      rolls,
+      modifier: damageModifier,
+      total: totalDamage,
+      targetHpBefore: before,
+      targetHpAfter: target.currentHitPoints,
+      summary: `${actor.name}'s ${actionKey} slams into ${target.name} for ${totalDamage} damage (${before} -> ${target.currentHitPoints}).`,
+    });
+    return;
+  }
+
+  const hasAdvantage = target.guidingBoltMark?.sourceId === actor.id;
+  const firstRoll = rng.rollDie(20);
+  const secondRoll = hasAdvantage ? rng.rollDie(20) : null;
+  const attackRoll = secondRoll === null ? firstRoll : Math.max(firstRoll, secondRoll);
+  if (hasAdvantage) {
+    delete target.guidingBoltMark;
+  }
+  const total = attackRoll + attackModifier;
+  const isHit = attackRoll !== 1 && (attackRoll === 20 || total >= target.armorClass);
+
+  events.push({
+    type: "attack",
+    round,
+    participantId: actor.id,
+    targetId: target.id,
+    attackRoll,
+    attackModifier,
+    total,
+    targetArmorClass: target.armorClass,
+    isHit,
+    summary: `${actor.name} uses ${actionKey}${hasAdvantage ? " with advantage" : ""} on ${target.name}: d20=${attackRoll} + ${attackModifier} = ${total} vs AC ${target.armorClass}${isHit ? " hit" : " miss"}.`,
+  });
+
+  if (!isHit) {
+    return;
+  }
+
+  spendEncounterResourceIfNeeded(actor, actionKey);
+  const damageRollCount = attackRoll === 20 ? damageDiceCount * 2 : damageDiceCount;
+  const rolls = Array.from({ length: damageRollCount }, () => rng.rollDie(damageDieSides));
+  const totalDamage = Math.max(0, rolls.reduce((sum, value) => sum + value, 0) + damageModifier);
+  const before = target.currentHitPoints;
+  target.currentHitPoints = Math.max(0, target.currentHitPoints - totalDamage);
+  actor.damageDealt += totalDamage;
+
+  events.push({
+    type: "damage",
+    round,
+    participantId: actor.id,
+    targetId: target.id,
+    rolls,
+    modifier: damageModifier,
+    total: totalDamage,
+    targetHpBefore: before,
+    targetHpAfter: target.currentHitPoints,
+    summary: `${actor.name}'s ${actionKey} deals ${totalDamage} damage to ${target.name} (${before} -> ${target.currentHitPoints}).`,
+  });
+
+  if (appliesGuidingBolt) {
+    target.guidingBoltMark = {
+      sourceId: actor.id,
+      grantedRound: round,
+    };
+    events.push({
+      type: "turn_start",
+      round,
+      participantId: actor.id,
+      summary: `${target.name} is outlined in radiant light, giving the next attack against them an easier opening.`,
+    });
+  }
+}
+
+function spendEncounterResourceIfNeeded(actor: MutableEncounterParticipant, actionKey: string) {
+  if (!["Magic Missile", "Guiding Bolt"].includes(actionKey)) {
+    return;
+  }
+
+  actor.spellSlotsLevel1 = Math.max(0, (actor.spellSlotsLevel1 ?? 0) - 1);
 }
 
 function checkWinningSide(participants: MutableEncounterParticipant[]): EncounterSide | null {

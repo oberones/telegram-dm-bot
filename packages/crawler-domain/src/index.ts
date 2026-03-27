@@ -82,6 +82,7 @@ import {
   resolveEncounterRound,
   resolveRetreatAttempt,
   type EncounterEvent,
+  type EncounterPlayerActionKey,
   type EncounterParticipant,
   type EncounterState,
   type EncounterResolutionResult,
@@ -393,6 +394,7 @@ type PersistedEncounterState = {
   state?: EncounterState;
   fallbackRoomId?: string | null;
   retreatVotes?: string[];
+  playerActions?: Record<string, EncounterPlayerActionKey>;
   nextSequenceNumber?: number;
 };
 
@@ -597,7 +599,13 @@ function toPlayerEncounterParticipant(
   runHitPoints: RunCombatHitPointRecord,
   slot: number,
 ): EncounterParticipant {
-  const derived = character.derived_stats as { maxHp?: number; armorClass?: number; initiativeMod?: number };
+  const derived = character.derived_stats as {
+    maxHp?: number;
+    armorClass?: number;
+    initiativeMod?: number;
+    saveMods?: Record<string, number>;
+  };
+  const resourceState = character.resource_state as { spellSlots?: Record<string, number> };
   const defaultProfile: Pick<
     EncounterParticipant,
     "attackModifier" | "damageDiceCount" | "damageDieSides" | "damageModifier"
@@ -648,7 +656,10 @@ function toPlayerEncounterParticipant(
     id: `player-${slot}-${character.id}`,
     name: character.name,
     side: "player",
+    classKey: member.class_key as "fighter" | "rogue" | "wizard" | "cleric",
     initiativeModifier: (derived.initiativeMod ?? 0) + progressionBonuses.initiativeBonus + runEffectTotals.initiativeBonus,
+    dexteritySaveModifier: derived.saveMods?.dex ?? 0,
+    spellSlotsLevel1: resourceState.spellSlots?.level1 ?? 0,
     armorClass: (derived.armorClass ?? 10) + equipmentEffect.armorClassBonus + progressionBonuses.armorClassBonus + runEffectTotals.armorClassBonus,
     hitPoints: currentHitPoints,
     maxHitPoints: effectiveMaxHp,
@@ -669,6 +680,8 @@ function toMonsterEncounterParticipant(
     side: "monster",
     monsterRole: template.role,
     initiativeModifier: template.initiativeModifier,
+    dexteritySaveModifier: template.initiativeModifier,
+    spellSlotsLevel1: 0,
     armorClass: template.armorClass,
     hitPoints: template.hitPoints,
     maxHitPoints: template.hitPoints,
@@ -733,6 +746,121 @@ export type EncounterXpAward = {
   totalXp: number;
   crawlerLevel: number;
 };
+
+type EncounterPlayerActionDefinition = {
+  key: EncounterPlayerActionKey;
+  label: string;
+  classes: Array<PartyMemberDetailRecord["class_key"]>;
+};
+
+const ENCOUNTER_PLAYER_ACTIONS: EncounterPlayerActionDefinition[] = [
+  { key: "attack", label: "Attack", classes: ["fighter", "rogue", "cleric"] },
+  { key: "melee_attack", label: "Melee Attack", classes: ["wizard"] },
+  { key: "fire_bolt", label: "Cast Fire Bolt", classes: ["wizard"] },
+  { key: "magic_missile", label: "Cast Magic Missile", classes: ["wizard"] },
+  { key: "sacred_flame", label: "Cast Sacred Flame", classes: ["cleric"] },
+  { key: "guiding_bolt", label: "Cast Guiding Bolt", classes: ["cleric"] },
+  { key: "retreat", label: "Retreat", classes: ["fighter", "rogue", "wizard", "cleric"] },
+];
+
+function encounterActionLabel(actionKey: EncounterPlayerActionKey) {
+  return ENCOUNTER_PLAYER_ACTIONS.find((action) => action.key === actionKey)?.label ?? actionKey;
+}
+
+export function encounterActionKeysForClass(classKey: PartyMemberDetailRecord["class_key"]) {
+  return ENCOUNTER_PLAYER_ACTIONS.filter((action) => action.classes.includes(classKey)).map((action) => action.key);
+}
+
+function livingPlayerParticipants(state: EncounterState) {
+  return state.participants.filter((participant) => participant.side === "player" && participant.currentHitPoints > 0);
+}
+
+function playerParticipantForMember(state: EncounterState, member: PartyMemberDetailRecord) {
+  return state.participants.find(
+    (participant) => participant.side === "player" && participant.id.endsWith(member.character_id),
+  ) ?? null;
+}
+
+function availableEncounterActionsForMember(
+  member: PartyMemberDetailRecord,
+  participant: EncounterState["participants"][number] | null,
+) {
+  return ENCOUNTER_PLAYER_ACTIONS.filter((action) => {
+    if (!action.classes.includes(member.class_key)) {
+      return false;
+    }
+
+    if (action.key === "magic_missile" || action.key === "guiding_bolt") {
+      return (participant?.spellSlotsLevel1 ?? 0) > 0;
+    }
+
+    return true;
+  });
+}
+
+function aggregateEncounterActions(
+  members: PartyMemberDetailRecord[],
+  state: EncounterState,
+) {
+  const definitions = new Map<EncounterPlayerActionKey, EncounterPlayerActionDefinition>();
+
+  for (const member of activeMembers(members)) {
+    const participant = playerParticipantForMember(state, member);
+
+    if (!participant || participant.currentHitPoints <= 0) {
+      continue;
+    }
+
+    for (const action of availableEncounterActionsForMember(member, participant)) {
+      definitions.set(action.key, action);
+    }
+  }
+
+  return ENCOUNTER_PLAYER_ACTIONS.filter((action) => definitions.has(action.key));
+}
+
+function pendingEncounterActionSummary(params: {
+  state: EncounterState;
+  members: PartyMemberDetailRecord[];
+  playerActions: Record<string, EncounterPlayerActionKey>;
+}) {
+  const lines: string[] = [];
+
+  for (const member of activeMembers(params.members)) {
+    const participant = playerParticipantForMember(params.state, member);
+
+    if (!participant || participant.currentHitPoints <= 0) {
+      continue;
+    }
+
+    const action = params.playerActions[participant.id];
+    lines.push(`- ${member.character_name}: ${action ? encounterActionLabel(action) : "Waiting"}`);
+  }
+
+  return lines;
+}
+
+function unresolvedRetreatConflict(
+  state: EncounterState,
+  playerActions: Record<string, EncounterPlayerActionKey>,
+) {
+  const livingPlayers = livingPlayerParticipants(state);
+  const submittedActions = livingPlayers
+    .map((participant) => playerActions[participant.id])
+    .filter((action): action is EncounterPlayerActionKey => Boolean(action));
+
+  return submittedActions.includes("retreat") && submittedActions.some((action) => action !== "retreat");
+}
+
+export function isEncounterRoundReadyToResolve(
+  state: EncounterState,
+  playerActions: Record<string, EncounterPlayerActionKey>,
+) {
+  const livingPlayers = livingPlayerParticipants(state);
+
+  return livingPlayers.every((participant) => Boolean(playerActions[participant.id]))
+    && !unresolvedRetreatConflict(state, playerActions);
+}
 
 export function encounterXpForRoomType(roomType: RunRoomDetailRecord["room_type"]) {
   switch (roomType) {
@@ -962,11 +1090,19 @@ function formatEncounterActionPrompt(params: {
   room: RunRoomDetailRecord;
   encounterId: string;
   state: EncounterState;
-  retreatVotes: string[];
+  playerActions: Record<string, EncounterPlayerActionKey>;
   members: PartyMemberDetailRecord[];
 }) {
   const playerLines = summarizeEncounterSide(params.state.participants, "player");
   const monsterLines = summarizeEncounterSide(params.state.participants, "monster");
+  const livingPlayers = livingPlayerParticipants(params.state);
+  const submittedCount = livingPlayers.filter((participant) => params.playerActions[participant.id]).length;
+  const actionLines = pendingEncounterActionSummary(params);
+  const mixedRetreat = unresolvedRetreatConflict(params.state, params.playerActions);
+  const actionButtons = aggregateEncounterActions(params.members, params.state).map((action) => ({
+    text: action.label,
+    callback_data: `crawler:encounter:action:${params.encounterId}:${params.state.nextRound}:${action.key}`,
+  }));
 
   return {
     text: [
@@ -975,7 +1111,7 @@ function formatEncounterActionPrompt(params: {
       `Run ID: ${params.run.id}`,
       `Theme: ${params.run.theme_key ?? "unknown"}`,
       `Round: ${params.state.nextRound}`,
-      `Retreat votes: ${params.retreatVotes.length}/${activeMembers(params.members).length}`,
+      `Actions locked: ${submittedCount}/${livingPlayers.length}`,
       "",
       "Party",
       ...(playerLines.length > 0 ? playerLines : ["- No surviving party members."]),
@@ -983,13 +1119,23 @@ function formatEncounterActionPrompt(params: {
       "Enemies",
       ...(monsterLines.length > 0 ? monsterLines : ["- No surviving enemies."]),
       "",
-      "Choose whether to press the attack or try to break away as a full party.",
+      "Selected Actions",
+      ...(actionLines.length > 0 ? actionLines : ["- No living players remain."]),
+      "",
+      mixedRetreat
+        ? "Retreat requires unanimity. Change actions until everyone chooses Retreat, or switch back to combat actions."
+        : "The round resolves automatically once every living player locks an action. Retreat only works if every living player chooses it.",
     ].join("\n"),
     replyMarkup: {
-      inline_keyboard: [
-        [{ text: "Attack", callback_data: `crawler:encounter:attack:${params.encounterId}:${params.state.nextRound}` }],
-        [{ text: "Vote Retreat", callback_data: `crawler:encounter:retreat:${params.encounterId}:${params.state.nextRound}` }],
-      ],
+      inline_keyboard: actionButtons.reduce<Array<Array<{ text: string; callback_data: string }>>>((rows, button, index) => {
+        if (index % 2 === 0) {
+          rows.push([button]);
+        } else {
+          rows[rows.length - 1]!.push(button);
+        }
+
+        return rows;
+      }, []),
     },
   } satisfies CrawlerOutboundMessage;
 }
@@ -999,7 +1145,7 @@ function formatEncounterRoundMessage(params: {
   room: RunRoomDetailRecord;
   encounterId: string;
   state: EncounterState;
-  retreatVotes: string[];
+  playerActions: Record<string, EncounterPlayerActionKey>;
   members: PartyMemberDetailRecord[];
   events: EncounterEvent[];
 }) {
@@ -1018,24 +1164,20 @@ function formatEncounterRoundMessage(params: {
   } satisfies CrawlerOutboundMessage;
 }
 
-function formatRetreatVoteMessage(params: {
+function formatEncounterActionLockedMessage(params: {
   run: AdventureRunRecord;
   room: RunRoomDetailRecord;
   encounterId: string;
   state: EncounterState;
-  retreatVotes: string[];
+  playerActions: Record<string, EncounterPlayerActionKey>;
   members: PartyMemberDetailRecord[];
 }) {
-  const voters = activeMembers(params.members)
-    .filter((member) => params.retreatVotes.includes(member.user_id))
-    .map((member) => member.character_name);
-
   const prompt = formatEncounterActionPrompt(params);
   return {
     text: [
-      "Retreat Vote Updated",
+      "Action Locked",
       "",
-      voters.length > 0 ? `Votes: ${voters.join(", ")}` : "No retreat votes recorded yet.",
+      ...pendingEncounterActionSummary(params),
       "",
       prompt.text,
     ].join("\n"),
@@ -1608,7 +1750,7 @@ async function buildRunMessage(runId: string, surface: CrawlerRunSurface = "grou
         room: currentRoom,
         encounterId: encounter.id,
         state: snapshot.state,
-        retreatVotes: snapshot.retreatVotes ?? [],
+        playerActions: snapshot.playerActions ?? {},
         members,
       });
 
@@ -2073,6 +2215,7 @@ async function resolveEncounterRoom(
       roomType: room.room_type,
       state: initialized.state,
       retreatVotes: [],
+      playerActions: {},
       nextSequenceNumber: 1,
     },
   });
@@ -2320,6 +2463,12 @@ export async function handleCrawlerCallback(
   callbackData: string,
 ): Promise<CrawlerCommandResult> {
   const user = await ensureUser(actor);
+
+  if (callbackData.startsWith("crawler:encounter:attack:")) {
+    callbackData = callbackData.replace("crawler:encounter:attack:", "crawler:encounter:action:") + ":attack";
+  } else if (callbackData.startsWith("crawler:encounter:retreat:")) {
+    callbackData = callbackData.replace("crawler:encounter:retreat:", "crawler:encounter:action:") + ":retreat";
+  }
 
   if (user.status !== "active") {
     return {
@@ -2940,6 +3089,7 @@ export async function handleCrawlerCallback(
           state,
           fallbackRoomId: fallbackRoom?.id ?? null,
           retreatVotes: [],
+          playerActions: {},
           nextSequenceNumber: events.length + 1,
         },
       });
@@ -2951,7 +3101,7 @@ export async function handleCrawlerCallback(
           room: currentRoom,
           encounterId,
           state,
-          retreatVotes: [],
+          playerActions: {},
           members,
         }),
       };
@@ -3027,16 +3177,17 @@ export async function handleCrawlerCallback(
     };
   }
 
-  if (callbackData.startsWith("crawler:encounter:attack:")) {
-    const [, , , encounterId, roundToken] = callbackData.split(":");
+  if (callbackData.startsWith("crawler:encounter:action:")) {
+    const [, , , encounterId, roundToken, actionToken] = callbackData.split(":");
     const expectedRound = Number(roundToken);
 
-    if (!encounterId || !Number.isInteger(expectedRound)) {
+    if (!encounterId || !Number.isInteger(expectedRound) || !actionToken) {
       return {
         alertText: "That combat action is invalid",
       };
     }
 
+    const actionKey = actionToken as EncounterPlayerActionKey;
     const encounter = await getEncounterById(encounterId);
 
     if (!encounter || encounter.status !== "active") {
@@ -3080,9 +3231,213 @@ export async function handleCrawlerCallback(
     }
 
     const members = await listPartyMemberDetails(party.id);
+    const actingMember = members.find((member) => member.id === membership.id) ?? null;
+
+    if (!actingMember) {
+      return {
+        alertText: "You are not an active member of this party",
+      };
+    }
+
+    const participant = playerParticipantForMember(state, actingMember);
+
+    if (!participant || participant.currentHitPoints <= 0) {
+      return {
+        alertText: "That character cannot act in this round",
+      };
+    }
+
+    const allowedActions = availableEncounterActionsForMember(actingMember, participant).map((action) => action.key);
+
+    if (!allowedActions.includes(actionKey)) {
+      return {
+        alertText: "That action is not available for this character right now",
+      };
+    }
+
+    const currentActions = { ...(snapshot?.playerActions ?? {}) };
+    const priorAction = currentActions[participant.id];
+    currentActions[participant.id] = actionKey;
+    const livingPlayers = livingPlayerParticipants(state);
+    const everyoneActed = livingPlayers.every((livingParticipant) => Boolean(currentActions[livingParticipant.id]));
+    const everyoneRetreats = livingPlayers.every((livingParticipant) => currentActions[livingParticipant.id] === "retreat");
+    const mixedRetreat = unresolvedRetreatConflict(state, currentActions);
+
+    if (!isEncounterRoundReadyToResolve(state, currentActions)) {
+      await updateEncounter({
+        encounterId: encounter.id,
+        encounterSnapshot: {
+          ...(snapshot ?? {}),
+          state,
+          retreatVotes: Object.entries(currentActions)
+            .filter(([, value]) => value === "retreat")
+            .map(([participantId]) => participantId),
+          playerActions: currentActions,
+          nextSequenceNumber: snapshot?.nextSequenceNumber ?? 1,
+        },
+      });
+
+      return {
+        alertText: mixedRetreat
+          ? "Retreat requires every living player to choose Retreat"
+          : priorAction === actionKey
+            ? `${encounterActionLabel(actionKey)} already locked`
+            : `${encounterActionLabel(actionKey)} locked`,
+        message: formatEncounterActionLockedMessage({
+          run,
+          room,
+          encounterId: encounter.id,
+          state,
+          playerActions: currentActions,
+          members,
+        }),
+      };
+    }
+
     const rooms = await listRunRoomDetails(run.id);
     const next = nextRoom(rooms, room.id);
-    const roundResult = resolveEncounterRound(state);
+
+    if (everyoneRetreats) {
+      const retreatResult = resolveRetreatAttempt(state);
+      const nextSequenceNumber = await appendEncounterEvents(encounter.id, snapshot ?? {}, retreatResult.events);
+      const partyHitPoints = updateRunHitPoints(run, retreatResult.finalParticipants, members);
+      await syncEncounterDefeatStates(members, retreatResult.finalParticipants);
+      const fallbackRoom = snapshot?.fallbackRoomId
+        ? await getRunRoomDetailById(snapshot.fallbackRoomId)
+        : previousRoom(rooms, room.id);
+
+      if (!retreatResult.succeeded) {
+        await updateEncounter({
+          encounterId: encounter.id,
+          status: "failed",
+          encounterSnapshot: {
+            ...(snapshot ?? {}),
+            state: retreatResult.state,
+            retreatVotes: [],
+            playerActions: {},
+            nextSequenceNumber,
+          },
+        });
+        await updateRunRoom({
+          roomId: room.id,
+          status: "failed",
+          resolved: true,
+        });
+        await updateAdventureRun({
+          runId: run.id,
+          status: "failed",
+          currentRoomId: room.id,
+          currentFloorNumber: room.floor_number,
+          activeEncounterId: null,
+          summary: buildRunSummary(run, {
+            failedRoomId: room.id,
+            failedRoomType: room.room_type,
+            partyHitPoints,
+            pendingEncounterId: null,
+            encounterFallbackRoomId: null,
+          }, []),
+        });
+        await updateParty({
+          partyId: party.id,
+          status: "completed",
+          activeRunId: null,
+        });
+
+        return {
+          alertText: "Retreat failed",
+          message: formatEncounterDefeatMessage(
+            (await getAdventureRunById(run.id)) ?? run,
+            room,
+            {
+              winningSide: "monster",
+              roundsCompleted: state.nextRound,
+              events: retreatResult.events,
+              finalParticipants: retreatResult.finalParticipants,
+            },
+          ),
+        };
+      }
+
+      if (!fallbackRoom) {
+        await updateEncounter({
+          encounterId: encounter.id,
+          status: "cancelled",
+          encounterSnapshot: {
+            ...(snapshot ?? {}),
+            state: retreatResult.state,
+            retreatVotes: [],
+            playerActions: {},
+            nextSequenceNumber,
+          },
+        });
+        await updateAdventureRun({
+          runId: run.id,
+          status: "abandoned",
+          activeEncounterId: null,
+          summary: buildRunSummary(run, {
+            partyHitPoints,
+            pendingEncounterId: null,
+            encounterFallbackRoomId: null,
+          }, []),
+        });
+        await updateParty({
+          partyId: party.id,
+          status: "abandoned",
+          activeRunId: null,
+        });
+
+        return {
+          alertText: "Retreat successful",
+          message: formatRetreatSuccessMessage({
+            run: (await getAdventureRunById(run.id)) ?? run,
+            room,
+            fallbackRoom: null,
+            events: retreatResult.events,
+            state: retreatResult.state,
+            encounterId: encounter.id,
+          }),
+        };
+      }
+
+      await updateEncounter({
+        encounterId: encounter.id,
+        status: "queued",
+        encounterSnapshot: {
+          ...(snapshot ?? {}),
+          state: retreatResult.state,
+          fallbackRoomId: fallbackRoom.id,
+          retreatVotes: [],
+          playerActions: {},
+          nextSequenceNumber,
+        },
+      });
+      await updateAdventureRun({
+        runId: run.id,
+        status: "awaiting_choice",
+        currentFloorNumber: fallbackRoom.floor_number,
+        currentRoomId: fallbackRoom.id,
+        activeEncounterId: null,
+        summary: buildRunSummary(run, {
+          partyHitPoints,
+          pendingEncounterId: encounter.id,
+          encounterFallbackRoomId: fallbackRoom.id,
+        }, []),
+      });
+
+      return {
+        alertText: "Retreat successful",
+        message: formatRetreatSuccessMessage({
+          run: (await getAdventureRunById(run.id)) ?? run,
+          room,
+          fallbackRoom,
+          events: retreatResult.events,
+          state: retreatResult.state,
+          encounterId: encounter.id,
+        }),
+      };
+    }
+
+    const roundResult = resolveEncounterRound(state, currentActions);
     const nextSequenceNumber = await appendEncounterEvents(encounter.id, snapshot ?? {}, roundResult.events);
     const partyHitPoints = updateRunHitPoints(run, roundResult.finalParticipants, members);
     const nextMembers = await syncEncounterDefeatStates(members, roundResult.finalParticipants);
@@ -3096,6 +3451,7 @@ export async function handleCrawlerCallback(
           ...(snapshot ?? {}),
           state: roundResult.state,
           retreatVotes: [],
+          playerActions: {},
           nextSequenceNumber,
         },
       });
@@ -3147,6 +3503,7 @@ export async function handleCrawlerCallback(
           ...(snapshot ?? {}),
           state: roundResult.state,
           retreatVotes: [],
+          playerActions: {},
           nextSequenceNumber,
         },
       });
@@ -3250,6 +3607,7 @@ export async function handleCrawlerCallback(
         ...(snapshot ?? {}),
         state: roundResult.state,
         retreatVotes: [],
+        playerActions: {},
         nextSequenceNumber,
       },
     });
@@ -3261,235 +3619,9 @@ export async function handleCrawlerCallback(
         room,
         encounterId: encounter.id,
         state: roundResult.state,
-        retreatVotes: [],
+        playerActions: {},
         members: nextMembers,
         events: roundResult.events,
-      }),
-    };
-  }
-
-  if (callbackData.startsWith("crawler:encounter:retreat:")) {
-    const [, , , encounterId, roundToken] = callbackData.split(":");
-    const expectedRound = Number(roundToken);
-
-    if (!encounterId || !Number.isInteger(expectedRound)) {
-      return {
-        alertText: "That retreat action is invalid",
-      };
-    }
-
-    const encounter = await getEncounterById(encounterId);
-
-    if (!encounter || encounter.status !== "active") {
-      return {
-        alertText: "That encounter is no longer active",
-      };
-    }
-
-    const run = await getAdventureRunById(encounter.run_id);
-    const room = await getRunRoomDetailById(encounter.room_id);
-
-    if (!run || !room || run.status !== "in_combat" || run.active_encounter_id !== encounter.id || run.current_room_id !== room.id) {
-      return {
-        alertText: "That encounter is no longer awaiting combat actions",
-      };
-    }
-
-    const party = await getPartyById(run.party_id);
-
-    if (!party) {
-      return {
-        alertText: "Party not found",
-      };
-    }
-
-    const membership = await getPartyMemberByPartyAndUser(party.id, user.id);
-
-    if (!membership || !ACTIVE_PARTY_MEMBER_STATUSES.has(membership.status)) {
-      return {
-        alertText: "You are not an active member of this party",
-      };
-    }
-
-    const snapshot = getEncounterStateSnapshot(encounter.encounter_snapshot);
-    const state = snapshot?.state;
-
-    if (!state || state.nextRound !== expectedRound) {
-      return {
-        alertText: "That combat prompt is stale",
-      };
-    }
-
-    const members = await listPartyMemberDetails(party.id);
-    const currentVotes = new Set(snapshot?.retreatVotes ?? []);
-
-    if (currentVotes.has(user.id)) {
-      return {
-        alertText: "You already voted to retreat this round",
-      };
-    }
-
-    currentVotes.add(user.id);
-    const requiredVotes = activeMembers(members).map((member) => member.user_id);
-    const unanimous = requiredVotes.every((memberUserId) => currentVotes.has(memberUserId));
-
-    if (!unanimous) {
-      await updateEncounter({
-        encounterId: encounter.id,
-        encounterSnapshot: {
-          ...(snapshot ?? {}),
-          state,
-          retreatVotes: [...currentVotes],
-          nextSequenceNumber: snapshot?.nextSequenceNumber ?? 1,
-        },
-      });
-
-      return {
-        alertText: "Retreat vote recorded",
-        message: formatRetreatVoteMessage({
-          run,
-          room,
-          encounterId: encounter.id,
-          state,
-          retreatVotes: [...currentVotes],
-          members,
-        }),
-      };
-    }
-
-    const retreatResult = resolveRetreatAttempt(state);
-    const nextSequenceNumber = await appendEncounterEvents(encounter.id, snapshot ?? {}, retreatResult.events);
-    const partyHitPoints = updateRunHitPoints(run, retreatResult.finalParticipants, members);
-    await syncEncounterDefeatStates(members, retreatResult.finalParticipants);
-    const rooms = await listRunRoomDetails(run.id);
-    const fallbackRoom = snapshot?.fallbackRoomId
-      ? await getRunRoomDetailById(snapshot.fallbackRoomId)
-      : previousRoom(rooms, room.id);
-
-    if (!retreatResult.succeeded) {
-      await updateEncounter({
-        encounterId: encounter.id,
-        status: "failed",
-        encounterSnapshot: {
-          ...(snapshot ?? {}),
-          state: retreatResult.state,
-          retreatVotes: [],
-          nextSequenceNumber,
-        },
-      });
-      await updateRunRoom({
-        roomId: room.id,
-        status: "failed",
-        resolved: true,
-      });
-      await updateAdventureRun({
-        runId: run.id,
-        status: "failed",
-        currentRoomId: room.id,
-        currentFloorNumber: room.floor_number,
-        activeEncounterId: null,
-        summary: buildRunSummary(run, {
-          failedRoomId: room.id,
-          failedRoomType: room.room_type,
-          partyHitPoints,
-          pendingEncounterId: null,
-          encounterFallbackRoomId: null,
-        }, []),
-      });
-      await updateParty({
-        partyId: party.id,
-        status: "completed",
-        activeRunId: null,
-      });
-
-      return {
-        alertText: "Retreat failed",
-        message: formatEncounterDefeatMessage(
-          (await getAdventureRunById(run.id)) ?? run,
-          room,
-          {
-            winningSide: "monster",
-            roundsCompleted: state.nextRound,
-            events: retreatResult.events,
-            finalParticipants: retreatResult.finalParticipants,
-          },
-        ),
-      };
-    }
-
-    if (!fallbackRoom) {
-      await updateEncounter({
-        encounterId: encounter.id,
-        status: "cancelled",
-        encounterSnapshot: {
-          ...(snapshot ?? {}),
-          state: retreatResult.state,
-          retreatVotes: [],
-          nextSequenceNumber,
-        },
-      });
-      await updateAdventureRun({
-        runId: run.id,
-        status: "abandoned",
-        activeEncounterId: null,
-        summary: buildRunSummary(run, {
-          partyHitPoints,
-          pendingEncounterId: null,
-          encounterFallbackRoomId: null,
-        }, []),
-      });
-      await updateParty({
-        partyId: party.id,
-        status: "abandoned",
-        activeRunId: null,
-      });
-
-      return {
-        alertText: "Retreat successful",
-        message: formatRetreatSuccessMessage({
-          run: (await getAdventureRunById(run.id)) ?? run,
-          room,
-          fallbackRoom: null,
-          events: retreatResult.events,
-          state: retreatResult.state,
-          encounterId: encounter.id,
-        }),
-      };
-    }
-
-    await updateEncounter({
-      encounterId: encounter.id,
-      status: "queued",
-      encounterSnapshot: {
-        ...(snapshot ?? {}),
-        state: retreatResult.state,
-        fallbackRoomId: fallbackRoom.id,
-        retreatVotes: [],
-        nextSequenceNumber,
-      },
-    });
-    await updateAdventureRun({
-      runId: run.id,
-      status: "awaiting_choice",
-      currentFloorNumber: fallbackRoom.floor_number,
-      currentRoomId: fallbackRoom.id,
-      activeEncounterId: null,
-      summary: buildRunSummary(run, {
-        partyHitPoints,
-        pendingEncounterId: encounter.id,
-        encounterFallbackRoomId: fallbackRoom.id,
-      }, []),
-    });
-
-    return {
-      alertText: "Retreat successful",
-      message: formatRetreatSuccessMessage({
-        run: (await getAdventureRunById(run.id)) ?? run,
-        room,
-        fallbackRoom,
-        events: retreatResult.events,
-        state: retreatResult.state,
-        encounterId: encounter.id,
       }),
     };
   }
@@ -3563,6 +3695,7 @@ export async function handleCrawlerCallback(
       encounterSnapshot: {
         ...(snapshot ?? {}),
         retreatVotes: [],
+        playerActions: {},
       },
     });
 
@@ -3573,7 +3706,7 @@ export async function handleCrawlerCallback(
         room,
         encounterId: encounter.id,
         state,
-        retreatVotes: [],
+        playerActions: {},
         members,
       }),
     };
